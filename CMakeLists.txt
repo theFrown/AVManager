@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
 project(AVManager)
 set(CMAKE_CXX_STANDARD 20)
-add_executable(AVManager main.cpp)
+add_executable(AVManager main.cpp AVRHandler.cpp)
 target_link_libraries(AVManager ws2_32)
