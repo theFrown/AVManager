@@ -1,15 +1,19 @@
 #pragma once
 
+#include <array>
+#include <string>
 #include <winsock2.h>
+
+enum class Verbosity { Silent, Error, Warning, Info, Debug };
 
 class AVRHandler {
 public:
-    AVRHandler();
+    AVRHandler(Verbosity verbosity = Verbosity::Debug); //change to warning later
     AVRHandler(const AVRHandler&) = delete;
     AVRHandler(AVRHandler&&) = delete;
     AVRHandler& operator=(const AVRHandler&) = delete;
     AVRHandler& operator=(AVRHandler&&) = delete;
-    // ~AVRHandler();
+    ~AVRHandler();
 
     int status;
     int testcoms();
@@ -18,17 +22,18 @@ public:
 private:
     constexpr static const char* ip_string_ = "192.168.1.200";
     constexpr static int port_ = 23;
-    constexpr static int inbufferlen_ = 20;
+    constexpr static int inbufferlen_ = 50;
 
-    char inbuffer_[inbufferlen_ + 1];
-    SOCKET socket_;
+    std::array<char, inbufferlen_ + 1> inbuffer_;
+    std::string inchain_;
+    std::string inmessage_;
+    SOCKET socket_ = INVALID_SOCKET;
     sockaddr_in sockaddr_;
+    Verbosity verbosity_;
 
-    int SetupConnect();
-    int CheckIncoming(int time_out = 0, bool verbose = false);
-    int ReceiveAndParse(bool verbose = false);
-    // int Receive(bool verbose);
-    // int Parse(bool verbose);
-    // int Send(bool verbose);
-    // int Report(char* buffer, int bufferlen);
+    int SetupSocket();
+    int Connect();
+    int CheckIncoming(int time_out = 0);
+    int Receive();
+    int Parse();
 };
