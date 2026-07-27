@@ -1,5 +1,7 @@
 #include <iostream>
 #include <array>
+#include <optional>
+#include <stdexcept>
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include "AVRHandler.h"
@@ -35,6 +37,10 @@ AVRHandler::~AVRHandler() {
         closesocket(socket_);
     }
     WSACleanup();
+}
+
+int AVRHandler::ControlLoop() {
+    return 0;
 }
 
 int AVRHandler::SetupSocket() {
@@ -82,6 +88,33 @@ int AVRHandler::Connect() {
     return 0;
 }
 
+int AVRHandler::Send(std::string_view cmd) {
+    if (verbosity_ >= Verbosity::Info) {
+        std::cout << "Sending following command to AVR: [" << cmd << "]\n";
+    }
+    int response = send(socket_, cmd.data(), static_cast<int>(cmd.size()), 0);
+    if (response == SOCKET_ERROR) {
+        if (verbosity_ >= Verbosity::Warning) {
+            std::cerr << "Failed to send command: [" << cmd << "]\n";
+        }
+        return 1;        
+    }
+    return 0;
+}
+
+std::string AVRHandler::MakeCommand(std::string cmd, std::optional<int> num) {
+    if (num) {
+        if (cmd.compare(denon_cmd::volumeprefix) == 0) {
+            cmd += dbtostring(*num);
+        }
+        else {
+            cmd += std::to_string(*num);
+        }
+    }
+    cmd += '\r';
+    return cmd;
+}
+
 int AVRHandler::CheckIncoming(int time_out) {
     if (verbosity_ >= Verbosity::Debug) {
         std::cout << "Checking for incoming messages\n";
@@ -119,7 +152,7 @@ int AVRHandler::Receive() {
     if (verbosity_ >= Verbosity::Debug) {
         std::cout << "Receiving incoming message\n";
     }
-    int response = recv(socket_, inbuffer_.data(), inbuffer_.size(), 0);
+    int response = recv(socket_, inbuffer_.data(), static_cast<int>(inbuffer_.size()), 0);
     if (response == SOCKET_ERROR) { 
         if (verbosity_ >= Verbosity::Warning) {
             std::cerr << "Failed to receive response from AVR\n";
@@ -129,8 +162,8 @@ int AVRHandler::Receive() {
     inchain_.append(inbuffer_.data(), response);
     if (verbosity_ >= Verbosity::Debug) {
         inbuffer_[response] = '\0';
-        std::cout << "Received following from AVR:\n" << inbuffer_.data() << "\n";
-        std::cout << "Full chain now contains:\n" << inchain_ << "\n";
+        std::cout << "Received following from AVR: [" << inbuffer_.data() << "]\n";
+        std::cout << "Full chain now contains: [" << inchain_ << "]\n";
     }
     return 0;
 }
@@ -142,7 +175,7 @@ int AVRHandler::Parse() {
     auto index = inchain_.find('\r');
     if (index == std::string::npos) {
         if (verbosity_ >= Verbosity::Debug) {
-            std::cout << "Chain does not contain \\r:\n" << inchain_ << "\n";
+            std::cout << "Chain does not contain \\r: [" << inchain_ << "]\n";
         }
         return 1;
     }
@@ -156,22 +189,61 @@ int AVRHandler::Parse() {
     inmessage_ = inchain_.substr(0, index);
     inchain_.erase(0, index + 1);
     if (verbosity_ >= Verbosity::Info) {
-        std::cout << "Received message: " << inmessage_ << "\n";
+        std::cout << "Received message: [" << inmessage_ << "]\n";
     }
     if (verbosity_ >= Verbosity::Debug) { 
-        std::cout << "Remaining content of chain: \n" << inchain_ << "\n";
+        std::cout << "Remaining content of chain: [" << inchain_ << "]\n";
     }
     return 0;
 }
 
-int AVRHandler::testcoms() {
-    std::cout << "sending test command to AVR\n";
-    int response = send(socket_, denon_cmd::volumestatus, 
-                        strlen(denon_cmd::volumestatus), 0);
-    if (response == SOCKET_ERROR) { 
-        std::cout << "Failed to send test command\n";
-        return 1;        
+std::string AVRHandler::dbtostring(int db) {
+    std::string result;
+    db = static_cast<int>(round(db / 5.0)) * 5;
+    db += 800;
+    if (db <= 0) {
+        result = "00";
     }
+    else if (db >= 980) {
+        result = "98";
+    }
+    else {
+        if (db < 100) {
+            result = "0";
+        }
+        result += std::to_string(db / 10);
+        if ((db % 10) > 0) {
+            result += '5';
+        }
+    }
+    return result;
+}
+
+std::optional<int> AVRHandler::stringtodb(std::string str) {
+    if (str.size() == 2) {
+        str += '0';
+    }
+    try {
+        return std::stoi(str) - 800;
+    }
+    catch (const std::invalid_argument&) {
+        if (verbosity_ >= Verbosity::Warning) {
+            std::cerr << "Invalid string characters for db conversion: " << str << "\n";
+        }
+        return std::nullopt;
+    }
+    catch (const std::out_of_range&) {
+        if (verbosity_ >= Verbosity::Warning) {
+            std::cerr << "String too large for db conversion: " << str << "\n";
+        }
+        return std::nullopt;
+    }
+}
+
+int AVRHandler::testcoms() {
+    std::cout << "Sending test command to AVR\n";
+    int response = Send(MakeCommand(denon_cmd::volumeprefix, -200));
+    //int response = Send(denon_cmd::volumestatus);
     for (int i = 0; i < 10; i++) {
         if (CheckIncoming(10) == 0) {
             response = Receive();
