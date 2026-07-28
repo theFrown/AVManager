@@ -42,11 +42,12 @@ private:
     int ControlLoop();
     int SetupSocket();
     int Connect();
-    int Send(std::string_view cmd); //, std::optional<int> num = std::nullopt);
+    int Send(std::string_view cmd);
     std::string MakeCommand(std::string cmd, std::optional<int> num = std::nullopt);
     int CheckIncoming(int time_out = 0);
     int Receive();
     int Parse();
-    std::optional<int> stringtodb(std::string str);
+    int SyncIn();
     std::string dbtostring(int db);
+    std::optional<int> stringtodb(std::string str);
 };

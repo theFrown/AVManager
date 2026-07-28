@@ -89,10 +89,12 @@ int AVRHandler::Connect() {
 }
 
 int AVRHandler::Send(std::string_view cmd) {
+    std::string full{cmd};
+    full += '\r';
     if (verbosity_ >= Verbosity::Info) {
         std::cout << "Sending following command to AVR: [" << cmd << "]\n";
     }
-    int response = send(socket_, cmd.data(), static_cast<int>(cmd.size()), 0);
+    int response = send(socket_, full.data(), static_cast<int>(full.size()), 0);
     if (response == SOCKET_ERROR) {
         if (verbosity_ >= Verbosity::Warning) {
             std::cerr << "Failed to send command: [" << cmd << "]\n";
@@ -103,7 +105,7 @@ int AVRHandler::Send(std::string_view cmd) {
 }
 
 std::string AVRHandler::MakeCommand(std::string cmd, std::optional<int> num) {
-    if (num) {
+    if (num) {      //TODO: reevaluate if any usecase other than adding num occur
         if (cmd.compare(denon_cmd::volumeprefix) == 0) {
             cmd += dbtostring(*num);
         }
@@ -111,7 +113,6 @@ std::string AVRHandler::MakeCommand(std::string cmd, std::optional<int> num) {
             cmd += std::to_string(*num);
         }
     }
-    cmd += '\r';
     return cmd;
 }
 
@@ -159,6 +160,11 @@ int AVRHandler::Receive() {
         }
         return 1;        
     }
+    for (int i = 0; i < response; i++) {
+        if (inbuffer_[i] == '\r') {  //this symbol prints variably in terminals
+            inbuffer_[i] = '|';      //this symbol should never occur in denon-speak
+        }
+    }
     inchain_.append(inbuffer_.data(), response);
     if (verbosity_ >= Verbosity::Debug) {
         inbuffer_[response] = '\0';
@@ -172,7 +178,7 @@ int AVRHandler::Parse() {
     if (verbosity_ >= Verbosity::Debug) {
         std::cout << "Parsing received message chain\n";
     }
-    auto index = inchain_.find('\r');
+    auto index = inchain_.find('|');
     if (index == std::string::npos) {
         if (verbosity_ >= Verbosity::Debug) {
             std::cout << "Chain does not contain \\r: [" << inchain_ << "]\n";
@@ -195,6 +201,54 @@ int AVRHandler::Parse() {
         std::cout << "Remaining content of chain: [" << inchain_ << "]\n";
     }
     return 0;
+}
+
+int AVRHandler::SyncIn() {
+    if (inmessage_.empty()) {
+        if (verbosity_ >= Verbosity::Warning) {
+            std::cerr << "SyncIn called but no pending message!\n";
+        }
+        return 1;
+    }
+    if (inmessage_.starts_with(denon_cmd::volumeprefix)) {
+        if (inmessage_.starts_with(denon_cmd::volumemaxprefix)) {
+            std::string_view prefix = denon_cmd::volumemaxprefix;
+            std::string params = inmessage_.substr(prefix.size());
+            auto num = stringtodb(params);
+            if (!num) {
+                if (verbosity_ >= Verbosity::Warning) {
+                    std::cerr << "Parsing incoming [" << prefix << "] message failed. "
+                              << " params [" << params << "] do not convert cleanly to"
+                              << " an int\n";
+                }
+                return 2;
+            }
+            if (verbosity_ >= Verbosity::Debug) {
+                std::cout << "Denon reports max volume " << *num / 10.0 << " db\n";
+            }
+            reported_.maxvolume = *num;
+            return 0;
+        }
+        std::string_view prefix = denon_cmd::volumeprefix;
+        std::string params = inmessage_.substr(prefix.size());
+        auto num = stringtodb(params);
+        if (!num) {
+            if (verbosity_ >= Verbosity::Warning) {
+                std::cerr << "Parsing incoming [" << prefix << "] message failed. param"
+                          << "s [" << params << "] do not convert cleanly to an int\n";
+            }
+            return 2;
+        }
+        if (verbosity_ >= Verbosity::Debug) {
+            std::cout << "Denon reports current volume " << *num / 10.0 << " db\n";
+        }
+        reported_.volume = *num;
+        return 0;
+    }
+    if (verbosity_ >= Verbosity::Warning) {
+        std::cerr << "SyncIn: unrecognised message [" << inmessage_ << "]\n";
+    }
+    return 3;
 }
 
 std::string AVRHandler::dbtostring(int db) {
@@ -242,19 +296,29 @@ std::optional<int> AVRHandler::stringtodb(std::string str) {
 
 int AVRHandler::testcoms() {
     std::cout << "Sending test command to AVR\n";
-    int response = Send(MakeCommand(denon_cmd::volumeprefix, -200));
-    //int response = Send(denon_cmd::volumestatus);
+    //int response = Send(MakeCommand(denon_cmd::volumeprefix, -200));
+    std::cout << "reported state: \n  volume:    " << reported_.volume / 10.0 
+              << " db\n  maxvolume: " << reported_.maxvolume / 10.0 << " db\n";
+    int response = Send(denon_cmd::volumestatus);
     for (int i = 0; i < 10; i++) {
         if (CheckIncoming(10) == 0) {
             response = Receive();
             if (response != 0) {
                 return 2;
             }
-            response = Parse();
-            if (response != 0) {
-                return 3;
+            while (inchain_.size() > 0) {
+                response = Parse();
+                if (response != 0) {
+                    return 3;
+                }
+                response = SyncIn();
+                if (response != 0) {
+                    return 4;
+                }
             }
         }
     }
+    std::cout << "reported state: \n  volume:    " << reported_.volume / 10.0 
+              << " db\n  maxvolume: " << reported_.maxvolume / 10.0 << " db\n";
     return 0;
 }

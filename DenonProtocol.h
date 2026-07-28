@@ -3,13 +3,13 @@
 namespace denon_cmd {
     constexpr const char* volumeprefix    = "MV";
     constexpr const char* volumemaxprefix = "MVMAX ";
-    constexpr const char* volumestatus    = "MV?\r";
-    constexpr const char* volumeup        = "MVUP\r";
-    constexpr const char* volumedown      = "MVDOWN\r";
+    constexpr const char* volumestatus    = "MV?";
+    constexpr const char* volumeup        = "MVUP";
+    constexpr const char* volumedown      = "MVDOWN";
     constexpr const char* inputprefix = "SI";
-    constexpr const char* inputstatus = "SI?\r";
-    constexpr const char* inputTV     = "SITV\r";
+    constexpr const char* inputstatus = "SI?";
+    constexpr const char* inputTV     = "SITV";
     constexpr const char* surroundprefix = "MS";
-    constexpr const char* surroundstatus = "MS?\r";
-    constexpr const char* surroundmatrix = "MSMATRIX\r";
+    constexpr const char* surroundstatus = "MS?";
+    constexpr const char* surroundmatrix = "MSMATRIX";
 }
