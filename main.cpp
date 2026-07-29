@@ -6,7 +6,7 @@
 
 int main() {
     std::cout << "AVManager starting\n";
-    AVRHandler avr{};
+    AVRHandler avr{Verbosity::Debug};
     int response = avr.status;
     if (response != 0) {
         std::cout << "boo, error:\n" << response << "\n";
