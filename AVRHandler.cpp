@@ -3,6 +3,7 @@
 #include <optional>
 #include <stdexcept>
 #include <format>
+#include <chrono>
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include "AVRHandler.h"
@@ -10,7 +11,8 @@
 
 AVRHandler::AVRHandler(Verbosity verbosity) 
     : verbosity_(verbosity)
-{   status = 1;
+{   
+    status = 1;
     Report_ response = SetupSocket();
     if (response != Report_::OK) {
         status = 2;
@@ -22,6 +24,8 @@ AVRHandler::AVRHandler(Verbosity verbosity)
         }
         else {
             status = 0;
+            stayalive = true;
+            connection_healthy_ = true;
         }
     }
 }
@@ -46,11 +50,63 @@ AVRHandler::~AVRHandler() {
 }
 
 int AVRHandler::ControlLoop() {
+    auto test_deadline = Clock_::now() + MilliSeconds_(2000);
+    int test_stage = 0;
+    Report_ response{Report_::Unknown};
+    while (stayalive) {
+
+        //test infrastructure below v v
+        if (Clock_::now() > test_deadline) {
+            switch (test_stage) {
+                case 0:
+                    requested_.volume = -250;
+                    test_deadline = Clock_::now() + MilliSeconds_(2000);
+                    break;
+                case 1:
+                    requested_.volume = -350;
+                    test_deadline = Clock_::now() + MilliSeconds_(2000);
+                    break;
+                case 2:
+                    requested_.volume = -300;
+                    test_deadline = Clock_::now() + MilliSeconds_(2000);
+                    break;
+                case 3:
+                    stayalive = false;
+                    break;
+            }
+            test_stage++;
+        }
+        //test infrastructure above ^ ^
+
+        response = CheckIncoming(10);
+        if (response == Report_::Data) {
+            response = Receive();
+            while ((response = Parse()) == Report_::Data) {
+                response = SyncIn();
+                if (response != Report_::OK) {
+                    return 3; //problem with SyncIn
+                }
+            }
+            if (response != Report_::NoData) {
+                return 2; //problem with Parse
+            }
+        }
+        else if (response != Report_::NoData) {
+            return 1; //problem with CheckIncoming
+        }
+        if ((commanded_ != requested_) && (Clock_::now() > command_cooldown_)) {
+            response = SyncOut();
+            if (response != Report_::OK) {
+                return 4; //problem with Send
+            }
+        }
+    }
     return 0;
 }
 
 auto AVRHandler::SetupSocket() -> Report_ {
     Print(Verbosity::Info, "Setting up connection\n");
+    connection_healthy_ = false;
     WSADATA wsadata;
     int response = WSAStartup(MAKEWORD(2,2), &wsadata);
     if (response != 0) {
@@ -74,22 +130,32 @@ auto AVRHandler::SetupSocket() -> Report_ {
 
 auto AVRHandler::Connect() -> Report_ {
     Print(Verbosity::Info, "Opening connection\n");
+    connection_healthy_ = false;
     int response = connect(socket_, reinterpret_cast<const sockaddr*>(&sockaddr_), sizeof(sockaddr_));
     if (response != 0) { 
         Print(Verbosity::Error, std::format("Failed to connect socket with response:\n    {}\n", 
                                             response));
         return Report_::SocketError;
     }
+    connection_healthy_ = true; //TODO, consider waiting until confirmed with handshake
     return Report_::OK;
 }
 
 auto AVRHandler::Send(std::string_view cmd) -> Report_ {
+    if (Clock_::now() < command_cooldown_) {
+        Print(Verbosity::Warning, std::format("Tried to send command [{}] while in cooldown.\n",
+                                              cmd));
+        return Report_::Wait;       
+    }
     std::string full{cmd};
     full += '\r';
     Print(Verbosity::Info, std::format("Sending following command to AVR: [{}]\n", cmd));
     int response = send(socket_, full.data(), static_cast<int>(full.size()), 0);
+    command_cooldown_ = Clock_::now() + cooldown_default_;
+    response_deadline_ = Clock_::now() + patience_default_;
     if (response == SOCKET_ERROR) {
         Print(Verbosity::Warning, std::format("Failed to send command: [{}]\n", cmd));
+        connection_healthy_ = false;
         return Report_::SocketError;        
     }
     return Report_::OK;
@@ -107,7 +173,24 @@ std::string AVRHandler::MakeCommand(std::string cmd, std::optional<int> num) con
     return cmd;
 }
 
-auto AVRHandler::CheckIncoming(int time_out) const -> Report_ {
+auto AVRHandler::SyncOut() -> Report_ {
+    Report_ response{Report_::Unknown};
+    if (commanded_.volume != requested_.volume) {
+        response = Send(MakeCommand(denon_cmd::volumeprefix, requested_.volume));
+        if (response == Report_::OK) {
+            commanded_.volume = requested_.volume;
+        }
+    }
+    else if (commanded_.maxvolume != requested_.maxvolume) {
+        response = Send(MakeCommand(denon_cmd::volumemaxprefix, requested_.maxvolume));
+        if (response == Report_::OK) {
+            commanded_.maxvolume = requested_.maxvolume;
+        }
+    }
+    return response;
+}
+
+auto AVRHandler::CheckIncoming(int time_out) -> Report_ {
     Print(Verbosity::Debug, "Checking for incoming messages\n");
     timeval tv{0, time_out * 1000};
     fd_set readfds;
@@ -115,30 +198,33 @@ auto AVRHandler::CheckIncoming(int time_out) const -> Report_ {
     FD_SET(socket_, &readfds);
     int response = select(0, &readfds, nullptr, nullptr, &tv);
     if (response == 0) {
-        Print(Verbosity::Debug, "no incoming messages\n");
+        Print(Verbosity::Trace, "No incoming messages\n");
         return Report_::NoData;
     }
-    else if (response == SOCKET_ERROR) {
-        Print(Verbosity::Warning, "issue with checking for messages\n");
+    if (response == SOCKET_ERROR) {
+        Print(Verbosity::Warning, "Issue with checking for messages\n");
+        connection_healthy_ = false;
         return Report_::SocketError;
     }
     if (FD_ISSET(socket_, &readfds)) {
-        Print(Verbosity::Debug, "incoming message from AVR\n");
+        Print(Verbosity::Debug, "Incoming message from AVR\n");
         return Report_::Data;
     }
-    Print(Verbosity::Warning, "incoming message from a mystery socket\n");
+    Print(Verbosity::Warning, "Incoming message from a mystery socket\n");
     return Report_::Unknown;
 }
 
 auto AVRHandler::Receive() -> Report_ {
-    Print(Verbosity::Debug, "Receiving incoming message\n");
+    Print(Verbosity::Trace, "Receiving incoming message\n");
     int response = recv(socket_, inbuffer_.data(), static_cast<int>(inbuffer_.size()), 0);
     if (response == SOCKET_ERROR) { 
-        Print(Verbosity::Warning, "Failed to receive response from AVR\n");
+        Print(Verbosity::Warning, "Failed to retreive response from AVR\n");
+        connection_healthy_ = false;
         return Report_::SocketError;        
     }
     if (response == 0) { //TODO: change warning to info/debug when this is expected
         Print(Verbosity::Warning, "Tried to receive from closed connection\n");
+        connection_healthy_ = false;
         return Report_::Disconnected;
     }
     for (int i = 0; i < response; i++) {
@@ -155,6 +241,14 @@ auto AVRHandler::Receive() -> Report_ {
 
 auto AVRHandler::Parse() -> Report_ {
     Print(Verbosity::Debug, "Parsing received message chain\n");
+    if (!inmessage_.empty()) {
+        Print(Verbosity::Warning, "Tried to parse new message before previous was processed");
+        return Report_::Wait;
+    }
+    if (inchain_.empty()) {
+        Print(Verbosity::Trace, "Chain is empty, nothing to parse\n");
+        return Report_::NoData;
+    }
     auto index = inchain_.find('|');
     if (index == std::string::npos) {
         Print(Verbosity::Debug, std::format("Chain does not contain \\r: [{}]\n", inchain_));
@@ -168,7 +262,7 @@ auto AVRHandler::Parse() -> Report_ {
     inmessage_ = inchain_.substr(0, index);
     inchain_.erase(0, index + 1);
     Print(Verbosity::Info, std::format("Received message: [{}]\n", inmessage_));
-    Print(Verbosity::Debug, std::format("Remaining content of chain: [{}]\n", inchain_));
+    Print(Verbosity::Trace, std::format("Remaining content of chain: [{}]\n", inchain_));
     return Report_::Data;
 }
 
@@ -177,10 +271,12 @@ auto AVRHandler::SyncIn() -> Report_ {
         Print(Verbosity::Warning, "SyncIn called but no pending message!\n");
         return Report_::NoData;
     }
-    if (inmessage_.starts_with(denon_cmd::volumeprefix)) {
-        if (inmessage_.starts_with(denon_cmd::volumemaxprefix)) {
+    std::string message = std::move(inmessage_);
+    inmessage_.clear();  //technically probably redundant, but helps me sleep easier
+    if (message.starts_with(denon_cmd::volumeprefix)) {
+        if (message.starts_with(denon_cmd::volumemaxprefix)) {
             std::string_view prefix = denon_cmd::volumemaxprefix;
-            std::string params = inmessage_.substr(prefix.size());
+            std::string params = message.substr(prefix.size());
             auto num = stringtodb(params);
             if (!num) {
                 Print(Verbosity::Warning, std::format("Parsing incoming message [{}] failed.\n    pa"
@@ -193,7 +289,7 @@ auto AVRHandler::SyncIn() -> Report_ {
             return Report_::OK;
         }
         std::string_view prefix = denon_cmd::volumeprefix;
-        std::string params = inmessage_.substr(prefix.size());
+        std::string params = message.substr(prefix.size());
         auto num = stringtodb(params);
         if (!num) {
             Print(Verbosity::Warning, std::format("Parsing incoming message [{}] failed\n    "
@@ -205,7 +301,7 @@ auto AVRHandler::SyncIn() -> Report_ {
         reported_.volume = *num;
         return Report_::OK;
     }
-    Print(Verbosity::Warning, std::format("SyncIn: unrecognised message [{}]\n", inmessage_));
+    Print(Verbosity::Warning, std::format("SyncIn: unrecognised message [{}]\n", message));
     return Report_::Unknown;
 }
 
@@ -264,14 +360,19 @@ void AVRHandler::Print(Verbosity level, std::string_view msg) const {
         case Verbosity::Debug:
             std::cout << "[DEBUG] " << msg;
             break;
+        case Verbosity::Trace:
+            std::cout << "[TRACE] " << msg;
+            break;
         default:
-            std::cerr << "[ERROR] Print called with invalid verbosity level\nMessage: " << msg;
+            std::cerr << "[ERROR] Print called with invalid verbosity level\n    Message: " << msg;
             break;
     }
     return;
 }
 
 int AVRHandler::testcoms() {
+    Verbosity verbosity_backup = verbosity_;
+    verbosity_ = Verbosity::Trace;
     Print(Verbosity::Debug, "Sending test command to AVR\n");
     Print(Verbosity::Debug, std::format("reported state:\n    volume:    {:+} db\n    maxvolume: "
                                         "{:+} db\n", reported_.volume / 10.0, 
@@ -279,21 +380,25 @@ int AVRHandler::testcoms() {
     //int response = Send(MakeCommand(denon_cmd::volumeprefix, -200));
     Report_ response = Send(denon_cmd::volumestatus);
     if (response != Report_::OK) {
+        verbosity_ = verbosity_backup;
         return 1;
     }
     for (int i = 0; i < 20; i++) {
         if (CheckIncoming(10) == Report_::Data) {
             response = Receive();
             if (response != Report_::Data) {
+                verbosity_ = verbosity_backup;
                 return 2;
             }
             while (inchain_.size() > 0) {
                 response = Parse();
                 if (response != Report_::Data) {
+                    verbosity_ = verbosity_backup;
                     return 3;
                 }
                 response = SyncIn();
                 if (response != Report_::OK) {
+                    verbosity_ = verbosity_backup;
                     return 4;
                 }
             }
@@ -302,5 +407,6 @@ int AVRHandler::testcoms() {
     Print(Verbosity::Debug, std::format("reported state:\n    volume:    {:+} db\n    maxvolume: "
                                         "{:+} db\n", reported_.volume / 10.0, 
                                         reported_.maxvolume / 10.0));
+    verbosity_ = verbosity_backup;
     return 0;
 }
