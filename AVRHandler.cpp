@@ -104,6 +104,107 @@ int AVRHandler::ControlLoop() {
     return 0;
 }
 
+int AVRHandler::testcoms() {
+    Verbosity verbosity_backup = verbosity_;
+    verbosity_ = Verbosity::Trace;
+    Print(Verbosity::Debug, "Sending test command to AVR\n");
+    Print(Verbosity::Debug, std::format("reported state:\n    volume:    {:+} db\n    maxvolume: "
+                                        "{:+} db\n", reported_.volume / 10.0, 
+                                        reported_.maxvolume / 10.0));
+    //int response = Send(MakeCommand(denon_cmd::volumeprefix, -200));
+    Report_ response = Send(denon_cmd::volumestatus);
+    if (response != Report_::OK) {
+        verbosity_ = verbosity_backup;
+        return 1;
+    }
+    for (int i = 0; i < 20; i++) {
+        if (CheckIncoming(10) == Report_::Data) {
+            response = Receive();
+            if (response != Report_::Data) {
+                verbosity_ = verbosity_backup;
+                return 2;
+            }
+            while (inchain_.size() > 0) {
+                response = Parse();
+                if (response != Report_::Data) {
+                    verbosity_ = verbosity_backup;
+                    return 3;
+                }
+                response = SyncIn();
+                if (response != Report_::OK) {
+                    verbosity_ = verbosity_backup;
+                    return 4;
+                }
+            }
+        }
+    }
+    Print(Verbosity::Debug, std::format("reported state:\n    volume:    {:+} db\n    maxvolume: "
+                                        "{:+} db\n", reported_.volume / 10.0, 
+                                        reported_.maxvolume / 10.0));
+    verbosity_ = verbosity_backup;
+    return 0;
+}
+
+auto AVRHandler::SyncIn() -> Report_ {
+    if (inmessage_.empty()) {
+        Print(Verbosity::Warning, "SyncIn called but no pending message!\n");
+        return Report_::NoData;
+    }
+    std::string message = std::move(inmessage_);
+    inmessage_.clear();  //technically probably redundant, but helps me sleep easier
+    if (message.starts_with(denon_cmd::volumeprefix)) {
+        if (message.starts_with(denon_cmd::volumemaxprefix)) {
+            std::string_view prefix = denon_cmd::volumemaxprefix;
+            std::string params = message.substr(prefix.size());
+            auto num = stringtodb(params);
+            if (!num) {
+                Print(Verbosity::Warning, std::format("Parsing incoming message [{}] failed.\n    pa"
+                                                      "rams [{}] do not convert cleanly to an int\n",
+                                                      prefix, params));
+                return Report_::BadInput;
+            }
+            Print(Verbosity::Debug, std::format("Denon reports max volume {:+} db\n", *num / 10.0));
+            reported_.maxvolume = *num;
+            return Report_::OK;
+        }
+        std::string_view prefix = denon_cmd::volumeprefix;
+        std::string params = message.substr(prefix.size());
+        auto num = stringtodb(params);
+        if (!num) {
+            Print(Verbosity::Warning, std::format("Parsing incoming message [{}] failed\n    "
+                                                  "params [{}] do not convert cleanly to an int\n", 
+                                                  prefix, params));
+            return Report_::BadInput;
+        }
+        Print(Verbosity::Debug, std::format("Denon reports current volume {:+} db\n", *num / 10.0));
+        reported_.volume = *num;
+        return Report_::OK;
+    }
+    Print(Verbosity::Warning, std::format("SyncIn: unrecognised message [{}]\n", message));
+    return Report_::Unknown;
+}
+
+auto AVRHandler::SyncOut() -> Report_ {
+    Report_ response{Report_::Unknown};
+    if (commanded_.volume != requested_.volume) {
+        response = Send(MakeCommand(denon_cmd::volumeprefix, requested_.volume));
+        if (response == Report_::OK) {
+            commanded_.volume = requested_.volume;
+        }
+    }
+    else if (commanded_.maxvolume != requested_.maxvolume) {
+        response = Send(MakeCommand(denon_cmd::volumemaxprefix, requested_.maxvolume));
+        if (response == Report_::OK) {
+            commanded_.maxvolume = requested_.maxvolume;
+        }
+    }
+    return response;
+}
+
+auto AVRHandler::SyncBetween() -> Report_ {
+    return Report_::Unknown;
+}
+
 auto AVRHandler::SetupSocket() -> Report_ {
     Print(Verbosity::Info, "Setting up connection\n");
     connection_healthy_ = false;
@@ -139,55 +240,6 @@ auto AVRHandler::Connect() -> Report_ {
     }
     connection_healthy_ = true; //TODO, consider waiting until confirmed with handshake
     return Report_::OK;
-}
-
-auto AVRHandler::Send(std::string_view cmd) -> Report_ {
-    if (Clock_::now() < command_cooldown_) {
-        Print(Verbosity::Warning, std::format("Tried to send command [{}] while in cooldown.\n",
-                                              cmd));
-        return Report_::Wait;       
-    }
-    std::string full{cmd};
-    full += '\r';
-    Print(Verbosity::Info, std::format("Sending following command to AVR: [{}]\n", cmd));
-    int response = send(socket_, full.data(), static_cast<int>(full.size()), 0);
-    command_cooldown_ = Clock_::now() + cooldown_default_;
-    response_deadline_ = Clock_::now() + patience_default_;
-    if (response == SOCKET_ERROR) {
-        Print(Verbosity::Warning, std::format("Failed to send command: [{}]\n", cmd));
-        connection_healthy_ = false;
-        return Report_::SocketError;        
-    }
-    return Report_::OK;
-}
-
-std::string AVRHandler::MakeCommand(std::string cmd, std::optional<int> num) const {
-    if (num) {      //TODO: reevaluate if any usecase other than adding num occur
-        if (cmd.compare(denon_cmd::volumeprefix) == 0) {
-            cmd += dbtostring(*num);
-        }
-        else {
-            cmd += std::to_string(*num);
-        }
-    }
-    return cmd;
-}
-
-auto AVRHandler::SyncOut() -> Report_ {
-    Report_ response{Report_::Unknown};
-    if (commanded_.volume != requested_.volume) {
-        response = Send(MakeCommand(denon_cmd::volumeprefix, requested_.volume));
-        if (response == Report_::OK) {
-            commanded_.volume = requested_.volume;
-        }
-    }
-    else if (commanded_.maxvolume != requested_.maxvolume) {
-        response = Send(MakeCommand(denon_cmd::volumemaxprefix, requested_.maxvolume));
-        if (response == Report_::OK) {
-            commanded_.maxvolume = requested_.maxvolume;
-        }
-    }
-    return response;
 }
 
 auto AVRHandler::CheckIncoming(int time_out) -> Report_ {
@@ -266,43 +318,36 @@ auto AVRHandler::Parse() -> Report_ {
     return Report_::Data;
 }
 
-auto AVRHandler::SyncIn() -> Report_ {
-    if (inmessage_.empty()) {
-        Print(Verbosity::Warning, "SyncIn called but no pending message!\n");
-        return Report_::NoData;
+auto AVRHandler::Send(std::string_view cmd) -> Report_ {
+    if (Clock_::now() < command_cooldown_) {
+        Print(Verbosity::Warning, std::format("Tried to send command [{}] while in cooldown.\n",
+                                              cmd));
+        return Report_::Wait;       
     }
-    std::string message = std::move(inmessage_);
-    inmessage_.clear();  //technically probably redundant, but helps me sleep easier
-    if (message.starts_with(denon_cmd::volumeprefix)) {
-        if (message.starts_with(denon_cmd::volumemaxprefix)) {
-            std::string_view prefix = denon_cmd::volumemaxprefix;
-            std::string params = message.substr(prefix.size());
-            auto num = stringtodb(params);
-            if (!num) {
-                Print(Verbosity::Warning, std::format("Parsing incoming message [{}] failed.\n    pa"
-                                                      "rams [{}] do not convert cleanly to an int\n",
-                                                      prefix, params));
-                return Report_::BadInput;
-            }
-            Print(Verbosity::Debug, std::format("Denon reports max volume {:+} db\n", *num / 10.0));
-            reported_.maxvolume = *num;
-            return Report_::OK;
-        }
-        std::string_view prefix = denon_cmd::volumeprefix;
-        std::string params = message.substr(prefix.size());
-        auto num = stringtodb(params);
-        if (!num) {
-            Print(Verbosity::Warning, std::format("Parsing incoming message [{}] failed\n    "
-                                                  "params [{}] do not convert cleanly to an int\n", 
-                                                  prefix, params));
-            return Report_::BadInput;
-        }
-        Print(Verbosity::Debug, std::format("Denon reports current volume {:+} db\n", *num / 10.0));
-        reported_.volume = *num;
-        return Report_::OK;
+    std::string full{cmd};
+    full += '\r';
+    Print(Verbosity::Info, std::format("Sending following command to AVR: [{}]\n", cmd));
+    int response = send(socket_, full.data(), static_cast<int>(full.size()), 0);
+    command_cooldown_ = Clock_::now() + cooldown_default_;
+    response_deadline_ = Clock_::now() + patience_default_;
+    if (response == SOCKET_ERROR) {
+        Print(Verbosity::Warning, std::format("Failed to send command: [{}]\n", cmd));
+        connection_healthy_ = false;
+        return Report_::SocketError;        
     }
-    Print(Verbosity::Warning, std::format("SyncIn: unrecognised message [{}]\n", message));
-    return Report_::Unknown;
+    return Report_::OK;
+}
+
+std::string AVRHandler::MakeCommand(std::string cmd, std::optional<int> num) const {
+    if (num) {      //TODO: reevaluate if any usecase other than adding num occur
+        if (cmd.compare(denon_cmd::volumeprefix) == 0) {
+            cmd += dbtostring(*num);
+        }
+        else {
+            cmd += std::to_string(*num);
+        }
+    }
+    return cmd;
 }
 
 std::string AVRHandler::dbtostring(int db) const {
@@ -368,45 +413,4 @@ void AVRHandler::Print(Verbosity level, std::string_view msg) const {
             break;
     }
     return;
-}
-
-int AVRHandler::testcoms() {
-    Verbosity verbosity_backup = verbosity_;
-    verbosity_ = Verbosity::Trace;
-    Print(Verbosity::Debug, "Sending test command to AVR\n");
-    Print(Verbosity::Debug, std::format("reported state:\n    volume:    {:+} db\n    maxvolume: "
-                                        "{:+} db\n", reported_.volume / 10.0, 
-                                        reported_.maxvolume / 10.0));
-    //int response = Send(MakeCommand(denon_cmd::volumeprefix, -200));
-    Report_ response = Send(denon_cmd::volumestatus);
-    if (response != Report_::OK) {
-        verbosity_ = verbosity_backup;
-        return 1;
-    }
-    for (int i = 0; i < 20; i++) {
-        if (CheckIncoming(10) == Report_::Data) {
-            response = Receive();
-            if (response != Report_::Data) {
-                verbosity_ = verbosity_backup;
-                return 2;
-            }
-            while (inchain_.size() > 0) {
-                response = Parse();
-                if (response != Report_::Data) {
-                    verbosity_ = verbosity_backup;
-                    return 3;
-                }
-                response = SyncIn();
-                if (response != Report_::OK) {
-                    verbosity_ = verbosity_backup;
-                    return 4;
-                }
-            }
-        }
-    }
-    Print(Verbosity::Debug, std::format("reported state:\n    volume:    {:+} db\n    maxvolume: "
-                                        "{:+} db\n", reported_.volume / 10.0, 
-                                        reported_.maxvolume / 10.0));
-    verbosity_ = verbosity_backup;
-    return 0;
 }

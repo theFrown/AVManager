@@ -56,15 +56,16 @@ private:
     TimePoint_ command_cooldown_;
     TimePoint_ response_deadline_;
 
+    Report_ SyncIn();
+    Report_ SyncOut();
+    Report_ SyncBetween();
     Report_ SetupSocket();
     Report_ Connect();
-    Report_ Send(std::string_view cmd);
-    std::string MakeCommand(std::string cmd, std::optional<int> num = std::nullopt) const;
-    Report_ SyncOut();
     Report_ CheckIncoming(int time_out = 0);
     Report_ Receive();
     Report_ Parse();
-    Report_ SyncIn();
+    Report_ Send(std::string_view cmd);
+    std::string MakeCommand(std::string cmd, std::optional<int> num = std::nullopt) const;
     std::string dbtostring(int db) const;
     std::optional<int> stringtodb(std::string str) const;
     void Print(Verbosity level, std::string_view msg) const;
