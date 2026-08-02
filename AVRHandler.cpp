@@ -31,11 +31,29 @@ AVRHandler::AVRHandler(Verbosity verbosity)
 }
 
 AVRHandler::~AVRHandler() {
+    Print("Shutting down AVRHandler\n");
     if (socket_ != INVALID_SOCKET) {
         int response = shutdown(socket_, SD_SEND);
         if (response == 0) {
-            Print(Verbosity::Warning, "WARNING: DESTRUCTOR INCOMPLETE\n");
-            //[receive incoming messages for 2 more seconds]
+            TimePoint_ kill_deadline = Clock_::now() + MilliSeconds_(2000);
+            Report_ coms_response;
+            bool listening = true;
+            connection_shutting_down_ = true;
+            while (listening) {
+                coms_response = ControlReceive();
+                if (coms_response == Report_::Disconnected) {
+                    Print("Connection shutdown confirmed");
+                    listening = false;
+                }
+                else if (coms_response == Report_::SocketError) {
+                    Print("Connection error, forcing shutdown"); 
+                    listening = false;
+                }
+                if (Clock_::now() > kill_deadline) {
+                    Print("Connection timed out, forcing shutdown");
+                    listening = false;
+                }
+            }
         }
         else {
             Print(Verbosity::Warning, std::format("Socket shutdown failed with response:\n    {}\n"
@@ -52,6 +70,7 @@ AVRHandler::~AVRHandler() {
 int AVRHandler::ControlLoop() {
     auto test_deadline = Clock_::now() + MilliSeconds_(2000);
     int test_stage = 0;
+    // int test_db = -300;
     Report_ response{Report_::Unknown};
     while (stayalive) {
 
@@ -59,21 +78,71 @@ int AVRHandler::ControlLoop() {
         if (Clock_::now() > test_deadline) {
             switch (test_stage) {
                 case 0:
-                    requested_.volume = -250;
+                    Print("\n------------volume up to -28db------------\n\n");
+                    requested_.volume = -280;
                     in_charge_ = InCharge_::Request;
-                    test_deadline = Clock_::now() + MilliSeconds_(2000);
+                    test_deadline = Clock_::now() + MilliSeconds_(2500);
                     break;
                 case 1:
-                    requested_.volume = -350;
+                    Print("\n------------volume down to -32db------------\n\n");
+                    requested_.volume = -320;
                     in_charge_ = InCharge_::Request;
-                    test_deadline = Clock_::now() + MilliSeconds_(2000);
+                    test_deadline = Clock_::now() + MilliSeconds_(2500);
                     break;
                 case 2:
+                    Print("\n------------volume up to -30db------------\n\n");
                     requested_.volume = -300;
                     in_charge_ = InCharge_::Request;
-                    test_deadline = Clock_::now() + MilliSeconds_(10000);
+                    test_deadline = Clock_::now() + MilliSeconds_(2500);
                     break;
-                case 3:
+                // case 3:
+                //     Print("\n------------injecting denon report to -29db------------\n\n");
+                //     inchain_.append("MV51|");
+                //     test_deadline = Clock_::now() + MilliSeconds_(1000);
+                //     break;
+                // case 4:
+                //     if (test_db > -400) {
+                //         Print("\n------------injecting rapid denon reports (-30db to -40db)------------\n\n");
+                //         test_stage--; //keeps us in case 4
+                //         test_db -= 5;
+                //         inchain_.append(std::format("MV{}|",dbtostring(test_db)));
+                //     }
+                //     test_deadline = Clock_::now() + MilliSeconds_(10);
+                //     break;
+                // case 5:
+                //     Print("\n------------corruption test: set volume to -31db------------\n\n");
+                //     requested_.volume = -310;
+                //     in_charge_ = InCharge_::Request;
+                //     test_deadline = Clock_::now() + MilliSeconds_(1000);
+                //     break;
+                // case 6:
+                //     Print("\n------------injecting bad denon report after 1000ms------------\n\n");
+                //     inchain_.append("MV41|");
+                //     test_deadline = Clock_::now() + MilliSeconds_(1000);
+                //     break;
+                // case 7:
+                //     Print("\n------------corruption test: set volume to -30db------------\n\n");
+                //     requested_.volume = -300;
+                //     in_charge_ = InCharge_::Request;
+                //     test_deadline = Clock_::now() + MilliSeconds_(150);
+                //     break;
+                // case 8:
+                //     Print("\n------------injecting denon report after 150ms------------\n\n");
+                //     inchain_.append("MV42|");
+                //     test_deadline = Clock_::now() + MilliSeconds_(1000);
+                //     break;
+                // case 9:
+                //     Print("\n------------corruption test: set volume to -31db------------\n\n");
+                //     requested_.volume = -310;
+                //     in_charge_ = InCharge_::Request;
+                //     test_deadline = Clock_::now() + MilliSeconds_(10);
+                //     break;
+                // case 10:
+                //     Print("\n------------injecting denon report after 10ms------------\n\n");
+                //     inchain_.append("MV41|");
+                //     test_deadline = Clock_::now() + MilliSeconds_(2000);
+                //     break;
+                default:
                     stayalive = false;
                     break;
             }
@@ -82,31 +151,16 @@ int AVRHandler::ControlLoop() {
         //test infrastructure above ^ ^
 
         //receiving: making sure reported_ is up-to-date through SyncIn
-        response = CheckIncoming(10);
-        if (response == Report_::Data) {
-            response = Receive();
-            if (response != Report_::Data) {
-                return 2; //problem with Receive
-            }
-        }
-        else if (response != Report_::NoData) {
-            return 1; //problem with CheckIncoming
-        }
-        while ((response = Parse()) == Report_::Data) {
-            response = SyncIn();
-            if (response != Report_::OK) {
-                return 4; //problem with SyncIn
-            }
-        }
-        if (response != Report_::NoData) { //uses response from Parse
-            return 3; //problem with Parse
+        response = ControlReceive();
+        if (response != Report_::NoData) {
+            return 1; //issue in receive loop
         }
 
         //sending: making sure commanded_ is up-to-date through SyncOut
         if ((commanded_ != requested_) && (Clock_::now() > command_cooldown_)) {
             response = SyncOut();
             if (response != Report_::OK) {
-                return 5; //problem with Send
+                return 2; //problem with Send
             }
         }
 
@@ -153,6 +207,18 @@ int AVRHandler::testcoms() {
     PrintStates(Verbosity::Debug);
     verbosity_ = verbosity_backup;
     return 0;
+}
+
+auto AVRHandler::ControlReceive() -> Report_ {
+    Report_ response = CheckIncoming(10);
+    if (response != Report_::Data) return response;
+    response = Receive();
+    if (response != Report_::Data) return response;
+    while ((response = Parse()) == Report_::Data) {
+        response = SyncIn();
+        if (response != Report_::OK) return response;
+    }
+    return response; //NB: will always return response from Parse
 }
 
 auto AVRHandler::SyncIn() -> Report_ {
@@ -334,8 +400,13 @@ auto AVRHandler::Receive() -> Report_ {
         connection_healthy_ = false;
         return Report_::SocketError;        
     }
-    else if (response == 0) { //TODO: change warning to info/debug when this is expected
-        Print(Verbosity::Warning, "Tried to receive from closed connection\n");
+    else if (response == 0) { 
+        if (connection_shutting_down_) {
+            Print(Verbosity::Debug, "Connection shutdown confirmed by AVR\n");
+        }
+        else {
+            Print(Verbosity::Warning, "Tried to receive from closed connection\n");
+        }
         connection_healthy_ = false;
         return Report_::Disconnected;
     }

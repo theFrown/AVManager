@@ -54,9 +54,11 @@ private:
     DenonState reported_ = {};
     bool fully_synced_ = false;
     bool connection_healthy_ = false;
+    bool connection_shutting_down_ = false;
     TimePoint_ command_cooldown_;
     TimePoint_ response_deadline_;
 
+    Report_ ControlReceive();
     Report_ SyncIn();
     Report_ SyncOut();
     Report_ SyncResolve();
