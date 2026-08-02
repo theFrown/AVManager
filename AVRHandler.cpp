@@ -230,50 +230,38 @@ auto AVRHandler::SyncIn() -> Report_ {
     inmessage_.clear();  //technically probably redundant, but helps me sleep easier
     if (message.starts_with(denon_cmd::volumeprefix)) {
         if (message.starts_with(denon_cmd::volumemaxprefix)) {
-            std::string_view prefix = denon_cmd::volumemaxprefix;
-            std::string params = message.substr(prefix.size());
-            auto num = stringtodb(params);
-            if (!num) {
-                Print(Verbosity::Warning, std::format("Parsing incoming message [{}] failed.\n    pa"
-                                                      "rams [{}] do not convert cleanly to an int\n",
-                                                      prefix, params));
-                return Report_::BadInput;
-            }
-            Print(Verbosity::Debug, std::format("Denon reports max volume {:+} db\n", *num / 10.0));
-            if (*num != reported_.maxvolume){
-                reported_.maxvolume = *num;
-                fully_synced_ = false;
-                PrintStates(Verbosity::Debug);
-            }
-            else {
-                Print(Verbosity::Debug, "Reported value matches internal state, message ignored\n");
-            }
-            return Report_::OK;
-        }
-        std::string_view prefix = denon_cmd::volumeprefix;
-        std::string params = message.substr(prefix.size());
-        auto num = stringtodb(params);
-        if (!num) {
-            Print(Verbosity::Warning, std::format("Parsing incoming message [{}] failed\n    "
-                                                  "params [{}] do not convert cleanly to an int\n", 
-                                                  prefix, params));
-            return Report_::BadInput;
-        }
-        Print(Verbosity::Debug, std::format("Denon reports current volume {:+} db\n", *num / 10.0));
-        if (*num != reported_.volume) {
-            reported_.volume = *num;
-            fully_synced_ = false;
-            PrintStates(Verbosity::Debug);
+            return SyncInOne(message, denon_cmd::volumemaxprefix, "max volume", 
+                                 reported_.maxvolume);
         }
         else {
-            Print(Verbosity::Debug, "Reported value matches internal state, message ignored\n");
+            return SyncInOne(message, denon_cmd::volumeprefix, "volume", reported_.volume);
         }
-        return Report_::OK;
     }
     else {
         Print(Verbosity::Warning, std::format("SyncIn: unrecognised message [{}]\n", message));
         return Report_::Unknown;
     }
+}
+
+auto AVRHandler::SyncInOne(std::string_view message, std::string_view prefix, 
+                           std::string_view report_string, int& report_slot) -> Report_ {
+    std::string_view params = message.substr(prefix.size());
+    auto num = stringtodb(params);
+    if (!num) {
+        Print(Verbosity::Warning, std::format("Parsing incoming message [{}] failed.\n    params [{}]"
+                                              " do not convert cleanly to an int\n", prefix, params));
+        return Report_::BadInput;
+    }
+    Print(Verbosity::Debug, std::format("Denon reports {} {:+} db\n", report_string, *num / 10.0));
+    if (*num != report_slot){
+        report_slot = *num;
+        fully_synced_ = false;
+        PrintStates(Verbosity::Debug);
+    }
+    else {
+        Print(Verbosity::Debug, "Reported value matches internal state, message ignored\n");
+    }
+    return Report_::OK;
 }
 
 auto AVRHandler::SyncOut() -> Report_ {
@@ -507,20 +495,21 @@ std::string AVRHandler::dbtostring(int db) const {
     return result;
 }
 
-std::optional<int> AVRHandler::stringtodb(std::string str) const {
-    if (str.size() == 2) {
-        str += '0';
+std::optional<int> AVRHandler::stringtodb(std::string_view str) const {
+    std::string string{str};
+    if (string.size() == 2) {
+        string += '0';
     }
     try {
-        return std::stoi(str) - 800;
+        return std::stoi(string) - 800;
     }
     catch (const std::invalid_argument&) {
         Print(Verbosity::Warning,  std::format("Invalid string characters for db conversion: [{}]\n",
-                                               str));
+                                               string));
         return std::nullopt;
     }
     catch (const std::out_of_range&) {
-        Print(Verbosity::Warning, std::format("String too large for db conversion: [{}]\n", str));
+        Print(Verbosity::Warning, std::format("String too large for db conversion: [{}]\n", string));
         return std::nullopt;
     }
 }

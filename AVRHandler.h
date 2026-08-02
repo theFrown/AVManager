@@ -60,6 +60,8 @@ private:
 
     Report_ ControlReceive();
     Report_ SyncIn();
+    Report_ SyncInOne(std::string_view message, std::string_view prefix, 
+                      std::string_view report_string, int& report_slot);
     Report_ SyncOut();
     Report_ SyncResolve();
     Report_ SetupSocket();
@@ -70,7 +72,7 @@ private:
     Report_ Send(std::string_view cmd);
     std::string MakeCommand(std::string cmd, std::optional<int> num = std::nullopt) const;
     std::string dbtostring(int db) const;
-    std::optional<int> stringtodb(std::string str) const;
+    std::optional<int> stringtodb(std::string_view str) const;
     void Print(Verbosity level, std::string_view msg) const;
     void Print(std::string_view msg) const { Print(Verbosity::Info, msg); }
     void PrintStates(Verbosity level);
