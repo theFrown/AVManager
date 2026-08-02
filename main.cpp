@@ -5,6 +5,11 @@
 #include "AVRHandler.h"
 
 int main() {
+
+    #ifndef NDEBUG
+    std::cout << std::unitbuf;
+    #endif
+
     std::cout << "AVManager starting\n";
     AVRHandler avr{Verbosity::Debug};
     int response = avr.status;

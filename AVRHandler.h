@@ -31,6 +31,7 @@ public:
 
 private:
     enum class Report_ { OK, Data, NoData, Wait, Unknown, BadInput, Disconnected, SocketError };
+    enum class InCharge_ { Request, Report };
     using Clock_ = std::chrono::steady_clock;
     using TimePoint_ = Clock_::time_point;
     using MilliSeconds_ = std::chrono::milliseconds;
@@ -47,18 +48,18 @@ private:
     SOCKET socket_ = INVALID_SOCKET;
     sockaddr_in sockaddr_;
     Verbosity verbosity_;
+    InCharge_ in_charge_ = InCharge_::Report;
     DenonState requested_ = {};
     DenonState commanded_ = {};
     DenonState reported_ = {};
     bool fully_synced_ = false;
-    bool request_in_control_ = false;
     bool connection_healthy_ = false;
     TimePoint_ command_cooldown_;
     TimePoint_ response_deadline_;
 
     Report_ SyncIn();
     Report_ SyncOut();
-    Report_ SyncBetween();
+    Report_ SyncResolve();
     Report_ SetupSocket();
     Report_ Connect();
     Report_ CheckIncoming(int time_out = 0);
@@ -70,4 +71,5 @@ private:
     std::optional<int> stringtodb(std::string str) const;
     void Print(Verbosity level, std::string_view msg) const;
     void Print(std::string_view msg) const { Print(Verbosity::Info, msg); }
+    void PrintStates(Verbosity level);
 };

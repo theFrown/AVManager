@@ -60,15 +60,18 @@ int AVRHandler::ControlLoop() {
             switch (test_stage) {
                 case 0:
                     requested_.volume = -250;
+                    in_charge_ = InCharge_::Request;
                     test_deadline = Clock_::now() + MilliSeconds_(2000);
                     break;
                 case 1:
                     requested_.volume = -350;
+                    in_charge_ = InCharge_::Request;
                     test_deadline = Clock_::now() + MilliSeconds_(2000);
                     break;
                 case 2:
                     requested_.volume = -300;
-                    test_deadline = Clock_::now() + MilliSeconds_(2000);
+                    in_charge_ = InCharge_::Request;
+                    test_deadline = Clock_::now() + MilliSeconds_(10000);
                     break;
                 case 3:
                     stayalive = false;
@@ -78,27 +81,38 @@ int AVRHandler::ControlLoop() {
         }
         //test infrastructure above ^ ^
 
+        //receiving: making sure reported_ is up-to-date through SyncIn
         response = CheckIncoming(10);
         if (response == Report_::Data) {
             response = Receive();
-            while ((response = Parse()) == Report_::Data) {
-                response = SyncIn();
-                if (response != Report_::OK) {
-                    return 3; //problem with SyncIn
-                }
-            }
-            if (response != Report_::NoData) {
-                return 2; //problem with Parse
+            if (response != Report_::Data) {
+                return 2; //problem with Receive
             }
         }
         else if (response != Report_::NoData) {
             return 1; //problem with CheckIncoming
         }
+        while ((response = Parse()) == Report_::Data) {
+            response = SyncIn();
+            if (response != Report_::OK) {
+                return 4; //problem with SyncIn
+            }
+        }
+        if (response != Report_::NoData) { //uses response from Parse
+            return 3; //problem with Parse
+        }
+
+        //sending: making sure commanded_ is up-to-date through SyncOut
         if ((commanded_ != requested_) && (Clock_::now() > command_cooldown_)) {
             response = SyncOut();
             if (response != Report_::OK) {
-                return 4; //problem with Send
+                return 5; //problem with Send
             }
+        }
+
+        //closing the loop: making sure commanded_ and reported_ reconcile
+        if (!fully_synced_) { 
+            response = SyncResolve();
         }
     }
     return 0;
@@ -108,9 +122,7 @@ int AVRHandler::testcoms() {
     Verbosity verbosity_backup = verbosity_;
     verbosity_ = Verbosity::Trace;
     Print(Verbosity::Debug, "Sending test command to AVR\n");
-    Print(Verbosity::Debug, std::format("reported state:\n    volume:    {:+} db\n    maxvolume: "
-                                        "{:+} db\n", reported_.volume / 10.0, 
-                                        reported_.maxvolume / 10.0));
+    PrintStates(Verbosity::Debug);
     //int response = Send(MakeCommand(denon_cmd::volumeprefix, -200));
     Report_ response = Send(denon_cmd::volumestatus);
     if (response != Report_::OK) {
@@ -138,9 +150,7 @@ int AVRHandler::testcoms() {
             }
         }
     }
-    Print(Verbosity::Debug, std::format("reported state:\n    volume:    {:+} db\n    maxvolume: "
-                                        "{:+} db\n", reported_.volume / 10.0, 
-                                        reported_.maxvolume / 10.0));
+    PrintStates(Verbosity::Debug);
     verbosity_ = verbosity_backup;
     return 0;
 }
@@ -164,7 +174,14 @@ auto AVRHandler::SyncIn() -> Report_ {
                 return Report_::BadInput;
             }
             Print(Verbosity::Debug, std::format("Denon reports max volume {:+} db\n", *num / 10.0));
-            reported_.maxvolume = *num;
+            if (*num != reported_.maxvolume){
+                reported_.maxvolume = *num;
+                fully_synced_ = false;
+                PrintStates(Verbosity::Debug);
+            }
+            else {
+                Print(Verbosity::Debug, "Reported value matches internal state, message ignored\n");
+            }
             return Report_::OK;
         }
         std::string_view prefix = denon_cmd::volumeprefix;
@@ -177,32 +194,73 @@ auto AVRHandler::SyncIn() -> Report_ {
             return Report_::BadInput;
         }
         Print(Verbosity::Debug, std::format("Denon reports current volume {:+} db\n", *num / 10.0));
-        reported_.volume = *num;
+        if (*num != reported_.volume) {
+            reported_.volume = *num;
+            fully_synced_ = false;
+            PrintStates(Verbosity::Debug);
+        }
+        else {
+            Print(Verbosity::Debug, "Reported value matches internal state, message ignored\n");
+        }
         return Report_::OK;
     }
-    Print(Verbosity::Warning, std::format("SyncIn: unrecognised message [{}]\n", message));
-    return Report_::Unknown;
+    else {
+        Print(Verbosity::Warning, std::format("SyncIn: unrecognised message [{}]\n", message));
+        return Report_::Unknown;
+    }
 }
 
 auto AVRHandler::SyncOut() -> Report_ {
     Report_ response{Report_::Unknown};
     if (commanded_.volume != requested_.volume) {
+        fully_synced_ = false;
+        in_charge_ = InCharge_::Request;
         response = Send(MakeCommand(denon_cmd::volumeprefix, requested_.volume));
         if (response == Report_::OK) {
             commanded_.volume = requested_.volume;
         }
     }
     else if (commanded_.maxvolume != requested_.maxvolume) {
+        fully_synced_ = false;
+        in_charge_ = InCharge_::Request;
         response = Send(MakeCommand(denon_cmd::volumemaxprefix, requested_.maxvolume));
         if (response == Report_::OK) {
             commanded_.maxvolume = requested_.maxvolume;
         }
     }
+    PrintStates(Verbosity::Debug);
     return response;
 }
 
-auto AVRHandler::SyncBetween() -> Report_ {
-    return Report_::Unknown;
+auto AVRHandler::SyncResolve() -> Report_ {
+    if (in_charge_ == InCharge_::Request) {
+        if (Clock_::now() < response_deadline_) { 
+            return Report_::Wait;
+        }
+        else {
+            if ((reported_ == commanded_ ) && (commanded_ == requested_)) {
+                Print(Verbosity::Info, "All Commands succesfully sent and confirmed\n");
+                fully_synced_ = true;
+                in_charge_ = InCharge_::Report;
+                return Report_::OK;
+            }
+            else {
+                Print(Verbosity::Warning, "One or more commands have not been correctly reported back\n    "
+                    "    Ignoring unconfirmed commands and reverting to Requested state.\n");
+                commanded_ = reported_;  //forces desync between requested_ and commanded_
+                PrintStates(Verbosity::Debug);
+                return Report_::Data;
+            }
+        }
+    }
+    else {
+        Print(Verbosity::Info, "State succesfully updated by AVR-originated change\n");
+        commanded_ = requested_ = reported_;
+        fully_synced_ = true;
+        PrintStates(Verbosity::Debug);
+        response_deadline_ = Clock_::now();
+        return Report_::OK;
+    }
 }
 
 auto AVRHandler::SetupSocket() -> Report_ {
@@ -253,17 +311,19 @@ auto AVRHandler::CheckIncoming(int time_out) -> Report_ {
         Print(Verbosity::Trace, "No incoming messages\n");
         return Report_::NoData;
     }
-    if (response == SOCKET_ERROR) {
+    else if (response == SOCKET_ERROR) {
         Print(Verbosity::Warning, "Issue with checking for messages\n");
         connection_healthy_ = false;
         return Report_::SocketError;
     }
-    if (FD_ISSET(socket_, &readfds)) {
+    else if (FD_ISSET(socket_, &readfds)) {
         Print(Verbosity::Debug, "Incoming message from AVR\n");
         return Report_::Data;
     }
-    Print(Verbosity::Warning, "Incoming message from a mystery socket\n");
-    return Report_::Unknown;
+    else {
+        Print(Verbosity::Warning, "Incoming message from a mystery socket\n");
+        return Report_::Unknown;
+    }
 }
 
 auto AVRHandler::Receive() -> Report_ {
@@ -274,25 +334,26 @@ auto AVRHandler::Receive() -> Report_ {
         connection_healthy_ = false;
         return Report_::SocketError;        
     }
-    if (response == 0) { //TODO: change warning to info/debug when this is expected
+    else if (response == 0) { //TODO: change warning to info/debug when this is expected
         Print(Verbosity::Warning, "Tried to receive from closed connection\n");
         connection_healthy_ = false;
         return Report_::Disconnected;
     }
-    for (int i = 0; i < response; i++) {
-        if (inbuffer_[i] == '\r') {  //this symbol prints variably in terminals
-            inbuffer_[i] = '|';      //this symbol should never occur in the denon protocol
+    else {
+        for (int i = 0; i < response; i++) {
+            if (inbuffer_[i] == '\r') {  //this symbol prints variably in terminals
+                inbuffer_[i] = '|';      //this symbol should never occur in the denon protocol
+            }
         }
+        inchain_.append(inbuffer_.data(), response);
+        Print(Verbosity::Debug, std::format("Received following from AVR: [{}]\n    Full chain now "
+                                            "contains: [{}]\n", std::string_view(inbuffer_.data(), 
+                                            response), inchain_));
+        return Report_::Data;
     }
-    inchain_.append(inbuffer_.data(), response);
-    Print(Verbosity::Debug, std::format("Received following from AVR: [{}]\n    Full chain now conta"
-                                        "ins: [{}]\n", std::string_view(inbuffer_.data(), response), 
-                                        inchain_));
-    return Report_::Data;
 }
 
 auto AVRHandler::Parse() -> Report_ {
-    Print(Verbosity::Debug, "Parsing received message chain\n");
     if (!inmessage_.empty()) {
         Print(Verbosity::Warning, "Tried to parse new message before previous was processed");
         return Report_::Wait;
@@ -301,6 +362,7 @@ auto AVRHandler::Parse() -> Report_ {
         Print(Verbosity::Trace, "Chain is empty, nothing to parse\n");
         return Report_::NoData;
     }
+    Print(Verbosity::Debug, "Parsing received message chain\n");
     auto index = inchain_.find('|');
     if (index == std::string::npos) {
         Print(Verbosity::Debug, std::format("Chain does not contain \\r: [{}]\n", inchain_));
@@ -311,11 +373,13 @@ auto AVRHandler::Parse() -> Report_ {
         inchain_.erase(0, 1);
         return Report_::BadInput;
     }
-    inmessage_ = inchain_.substr(0, index);
-    inchain_.erase(0, index + 1);
-    Print(Verbosity::Info, std::format("Received message: [{}]\n", inmessage_));
-    Print(Verbosity::Trace, std::format("Remaining content of chain: [{}]\n", inchain_));
-    return Report_::Data;
+    else {
+        inmessage_ = inchain_.substr(0, index);
+        inchain_.erase(0, index + 1);
+        Print(Verbosity::Info, std::format("Received message: [{}]\n", inmessage_));
+        Print(Verbosity::Trace, std::format("Remaining content of chain: [{}]\n", inchain_));
+        return Report_::Data;
+    }
 }
 
 auto AVRHandler::Send(std::string_view cmd) -> Report_ {
@@ -413,4 +477,16 @@ void AVRHandler::Print(Verbosity level, std::string_view msg) const {
             break;
     }
     return;
+}
+
+void AVRHandler::PrintStates(Verbosity level) {
+    if (verbosity_ < level) return;
+    std::cout <<             "States:    | Requested | Commanded | Reported   \n";
+    std::cout <<             "===============================================\n";
+    std::cout << std::format("volume:    | {:+6.1f} db | {:+6.1f} db | {:+6.1f} db\n", 
+                             requested_.volume / 10.0, commanded_.volume / 10.0, 
+                             reported_.volume / 10.0);
+    std::cout << std::format("maxvolume: | {:+6.1f} db | {:+6.1f} db | {:+6.1f} db\n", 
+                             requested_.maxvolume / 10.0, commanded_.maxvolume / 10.0, 
+                             reported_.maxvolume / 10.0);
 }
