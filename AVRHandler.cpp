@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <format>
 #include <chrono>
+#include <thread>
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include "AVRHandler.h"
@@ -68,7 +69,7 @@ AVRHandler::~AVRHandler() {
 }
 
 int AVRHandler::ControlLoop() {
-    auto test_deadline = Clock_::now() + MilliSeconds_(2000);
+    auto test_deadline = Clock_::now() + MilliSeconds_(50);
     int test_stage = 0;
     // int test_db = -300;
     Report_ response{Report_::Unknown};
@@ -78,14 +79,14 @@ int AVRHandler::ControlLoop() {
         if (Clock_::now() > test_deadline) {
             switch (test_stage) {
                 case 0:
-                    Print("\n------------volume up to -28db------------\n\n");
-                    requested_.volume = -280;
+                    Print("\n-------volume to -35db-------\n\n");
+                    requested_.volume = -350;
                     in_charge_ = InCharge_::Request;
-                    test_deadline = Clock_::now() + MilliSeconds_(2500);
+                    test_deadline = Clock_::now() + MilliSeconds_(10000);
                     break;
                 case 1:
-                    Print("\n------------volume down to -32db------------\n\n");
-                    requested_.volume = -320;
+                    Print("\n------------volume to -26db------------\n\n");
+                    requested_.volume = -260;
                     in_charge_ = InCharge_::Request;
                     test_deadline = Clock_::now() + MilliSeconds_(2500);
                     break;
@@ -151,8 +152,8 @@ int AVRHandler::ControlLoop() {
         //test infrastructure above ^ ^
 
         //receiving: making sure reported_ is up-to-date through SyncIn
-        response = ControlReceive();
-        if (response != Report_::NoData) {
+        response = ControlReceive(10);
+        if ((response == Report_::SocketError) || (response == Report_::Disconnected)) {
             return 1; //issue in receive loop
         }
 
@@ -175,50 +176,128 @@ int AVRHandler::ControlLoop() {
 int AVRHandler::testcoms() {
     Verbosity verbosity_backup = verbosity_;
     verbosity_ = Verbosity::Trace;
-    Print(Verbosity::Debug, "Sending test command to AVR\n");
-    PrintStates(Verbosity::Debug);
+    // Print(Verbosity::Debug, "Sending test command to AVR\n");
+    // PrintStates(Verbosity::Debug);
     //int response = Send(MakeCommand(denon_cmd::volumeprefix, -200));
-    Report_ response = Send(denon_cmd::volumestatus);
+    // Report_ response = Send(denon_cmd::volume_status);
+    Report_ response = ControlResync();
     if (response != Report_::OK) {
         verbosity_ = verbosity_backup;
         return 1;
     }
-    for (int i = 0; i < 20; i++) {
-        if (CheckIncoming(10) == Report_::Data) {
-            response = Receive();
-            if (response != Report_::Data) {
-                verbosity_ = verbosity_backup;
-                return 2;
-            }
-            while (inchain_.size() > 0) {
-                response = Parse();
-                if (response != Report_::Data) {
-                    verbosity_ = verbosity_backup;
-                    return 3;
-                }
-                response = SyncIn();
-                if (response != Report_::OK) {
-                    verbosity_ = verbosity_backup;
-                    return 4;
-                }
-            }
-        }
-    }
-    PrintStates(Verbosity::Debug);
+    // for (int i = 0; i < 20; i++) {
+    //     if (CheckIncoming(10) == Report_::Data) {
+    //         response = Receive();
+    //         if (response != Report_::Data) {
+    //             verbosity_ = verbosity_backup;
+    //             return 2;
+    //         }
+    //         while (inchain_.size() > 0) {
+    //             response = Parse();
+    //             if (response != Report_::Data) {
+    //                 verbosity_ = verbosity_backup;
+    //                 return 3;
+    //             }
+    //             response = SyncIn();
+    //             if (response != Report_::OK) {
+    //                 verbosity_ = verbosity_backup;
+    //                 return 4;
+    //             }
+    //         }
+    //     }
+    // }
+    // PrintStates(Verbosity::Debug);
     verbosity_ = verbosity_backup;
     return 0;
 }
 
-auto AVRHandler::ControlReceive() -> Report_ {
-    Report_ response = CheckIncoming(10);
-    if (response != Report_::Data) return response;
-    response = Receive();
-    if (response != Report_::Data) return response;
-    while ((response = Parse()) == Report_::Data) {
-        response = SyncIn();
-        if (response != Report_::OK) return response;
+auto AVRHandler::ControlResync() -> Report_ {
+    Print("Syncing all parameters from the AVR\n");
+    PrintStates(Verbosity::Debug);
+    TimePoint_ deadline;
+    Report_ response = Report_::Unknown;
+    int attempt;
+    bool sent;
+    bool succeeded;
+    //TODO: might be smart to sleep for 'patience' ms (or more) to purge denon incoming messages 
+    for (int stage = 0; stage < 4; stage++) {
+        attempt = 1;
+        sent = false;
+        succeeded = false;
+        while (attempt < 4) {
+            if (!sent) {
+                switch (stage) {
+                    case 0:
+                        Print(Verbosity::Debug, "Syncing input/source\n");
+                        response = Send(denon_cmd::input_status, true);
+                        signal_ = denon_cmd::input_prefix; //read as 'last message we care about'
+                        break;                             //more may follow and are ignored
+                    case 1:
+                        Print(Verbosity::Debug, "Syncing surround mode\n");
+                        response = Send(denon_cmd::surround_status, true);
+                        signal_ = denon_cmd::surround_prefix;
+                        break;
+                    case 2:
+                        Print(Verbosity::Debug, "Syncing master volume\n");
+                        response = Send(denon_cmd::volume_status, true);
+                        signal_ = denon_cmd::volume_maxprefix;
+                        break;
+                    case 3:
+                        Print(Verbosity::Debug, "Syncing channel volumes\n");
+                        response = Send(denon_cmd::chanvol_status, true);
+                        signal_ = denon_cmd::chanvol_endreport;
+                        break;
+                    default:
+                        Print(Verbosity::Error, "ControlResync hit undefined stage\n");
+                        return Report_::Unknown;
+                        break;
+                }
+                if (response == Report_::OK) {
+                    sent = true;
+                    signal_received_ = false;
+                    deadline = Clock_::now() + MilliSeconds_(1000);
+                }
+                else {
+                    return response;
+                }
+            }
+            else {
+                response = ControlReceive(10);
+                if ((response == Report_::SocketError) || (response == Report_::Disconnected)) {
+                    return response;
+                }
+                if (Clock_::now() > deadline) {
+                    Print(Verbosity::Warning, std::format("Sync stage {} timed out\n", stage)); 
+                    sent = false;
+                    attempt++;
+                }
+                if (signal_received_) {
+                    Print(Verbosity::Trace, "Parameter successfully synced\n");
+                    succeeded = true;
+                    break;
+                }
+            }
+        }
+        if (!succeeded) return Report_::Unknown;
     }
-    return response; //NB: will always return response from Parse
+    Print(Verbosity::Debug, "Syncing succesful, state parameters now:\n");
+    PrintStates(Verbosity::Debug);
+    return Report_::OK;
+}
+
+auto AVRHandler::ControlReceive(int time_out) -> Report_ {
+    Report_ response = CheckIncoming(time_out);
+    if (response == Report_::SocketError) return response;
+    if (response == Report_::Data) {
+        response = Receive();
+        if ((response == Report_::SocketError) || (response == Report_::Disconnected)) return response;
+    }
+    if (inchain_.empty()) return response; //draining inchain_ is more important than transparency
+    while ((response = Parse()) == Report_::Data) { //TODO: what if it returns Report_::Wait?
+        response = SyncIn();
+        if (inchain_.empty() && response != Report_::OK) return response;
+    }
+    return response; //NB: this will always contain the response from Parse
 }
 
 auto AVRHandler::SyncIn() -> Report_ {
@@ -228,22 +307,81 @@ auto AVRHandler::SyncIn() -> Report_ {
     }
     std::string message = std::move(inmessage_);
     inmessage_.clear();  //technically probably redundant, but helps me sleep easier
-    if (message.starts_with(denon_cmd::volumeprefix)) {
-        if (message.starts_with(denon_cmd::volumemaxprefix)) {
-            return SyncInOne(message, denon_cmd::volumemaxprefix, "max volume", 
+    if (!signal_.empty() && message.starts_with(signal_)) {
+        signal_received_ = true;
+    }
+    if (message.starts_with(denon_cmd::input_prefix)) {
+        return SyncInString(message, denon_cmd::input_prefix, "input source", reported_.input);
+    }
+    else if (message.starts_with(denon_cmd::surround_prefix)) {
+        return SyncInString(message, denon_cmd::surround_prefix, "surround mode", reported_.surround);
+    }
+    else if (message.starts_with(denon_cmd::volume_prefix)) {
+        if (message.starts_with(denon_cmd::volume_maxprefix)) {
+            return SyncInDb(message, denon_cmd::volume_maxprefix, "max volume", 
                                  reported_.maxvolume);
         }
         else {
-            return SyncInOne(message, denon_cmd::volumeprefix, "volume", reported_.volume);
+            return SyncInDb(message, denon_cmd::volume_prefix, "volume", reported_.volume);
+        }
+    }
+    else if (message.starts_with(denon_cmd::chanvol_prefix)) {
+        if (message.starts_with(denon_cmd::chanvol_endreport)) {
+            Print(Verbosity::Debug, "Channel volume list complete\n");
+            return Report_::OK;
+        }
+        else if (message.starts_with(denon_cmd::chanvol_FL_prefix)) {
+            return (SyncInDb(message, denon_cmd::chanvol_FL_prefix, "FL volume", 
+                    reported_.chanvol.FL));
+        }
+        else if (message.starts_with(denon_cmd::chanvol_FR_prefix)) {
+            return (SyncInDb(message, denon_cmd::chanvol_FR_prefix, "FR volume", 
+                    reported_.chanvol.FR));
+        }
+        else if (message.starts_with(denon_cmd::chanvol_C_prefix)) {
+            return (SyncInDb(message, denon_cmd::chanvol_C_prefix, "C volume", 
+                    reported_.chanvol.C));
+        }
+        else if (message.starts_with(denon_cmd::chanvol_SW_prefix)) {
+            return (SyncInDb(message, denon_cmd::chanvol_SW_prefix, "SW volume", 
+                    reported_.chanvol.SW));
+        }
+        else if (message.starts_with(denon_cmd::chanvol_SL_prefix)) {
+            return (SyncInDb(message, denon_cmd::chanvol_SL_prefix, "SL volume", 
+                    reported_.chanvol.SL));
+        }
+        else if (message.starts_with(denon_cmd::chanvol_SR_prefix)) {
+            return (SyncInDb(message, denon_cmd::chanvol_SR_prefix, "SR volume", 
+                    reported_.chanvol.SR));
+        }
+        else {
+            auto p = message.substr(std::string_view(denon_cmd::chanvol_prefix).size());
+            Print(Verbosity::Warning, std::format("Unknown parameter [{}] for channel volume\n", p));
+            return Report_::Unknown;
         }
     }
     else {
-        Print(Verbosity::Warning, std::format("SyncIn: unrecognised message [{}]\n", message));
+        Print(Verbosity::Debug, std::format("Unrecognised message [{}]\n", message));
         return Report_::Unknown;
     }
 }
 
-auto AVRHandler::SyncInOne(std::string_view message, std::string_view prefix, 
+auto AVRHandler::SyncInString(std::string_view message, std::string_view prefix, 
+                           std::string_view report_string, std::string& report_slot) -> Report_ {
+    std::string_view params = message.substr(prefix.size());
+    Print(Verbosity::Debug, std::format("Denon reports {} set to {}\n", report_string, params));
+    if (params != report_slot){
+        report_slot = params;
+        fully_synced_ = false;
+        PrintStates(Verbosity::Debug);
+    }
+    else {
+        Print(Verbosity::Debug, "Reported value matches internal state, message ignored\n");
+    }
+    return Report_::OK;
+}
+
+auto AVRHandler::SyncInDb(std::string_view message, std::string_view prefix, 
                            std::string_view report_string, int& report_slot) -> Report_ {
     std::string_view params = message.substr(prefix.size());
     auto num = stringtodb(params);
@@ -269,7 +407,7 @@ auto AVRHandler::SyncOut() -> Report_ {
     if (commanded_.volume != requested_.volume) {
         fully_synced_ = false;
         in_charge_ = InCharge_::Request;
-        response = Send(MakeCommand(denon_cmd::volumeprefix, requested_.volume));
+        response = Send(MakeCommand(denon_cmd::volume_prefix, requested_.volume));
         if (response == Report_::OK) {
             commanded_.volume = requested_.volume;
         }
@@ -277,7 +415,7 @@ auto AVRHandler::SyncOut() -> Report_ {
     else if (commanded_.maxvolume != requested_.maxvolume) {
         fully_synced_ = false;
         in_charge_ = InCharge_::Request;
-        response = Send(MakeCommand(denon_cmd::volumemaxprefix, requested_.maxvolume));
+        response = Send(MakeCommand(denon_cmd::volume_maxprefix, requested_.maxvolume));
         if (response == Report_::OK) {
             commanded_.maxvolume = requested_.maxvolume;
         }
@@ -441,11 +579,17 @@ auto AVRHandler::Parse() -> Report_ {
     }
 }
 
-auto AVRHandler::Send(std::string_view cmd) -> Report_ {
+auto AVRHandler::Send(std::string_view cmd, bool wait) -> Report_ {
     if (Clock_::now() < command_cooldown_) {
-        Print(Verbosity::Warning, std::format("Tried to send command [{}] while in cooldown.\n",
-                                              cmd));
-        return Report_::Wait;       
+        if (wait) { 
+            Print(Verbosity::Debug, "Send called within cooldown, waiting for it to end\n");
+            std::this_thread::sleep_until(command_cooldown_);
+        }
+        else {
+            Print(Verbosity::Warning, std::format("Tried to send command [{}] while in cooldown.\n",
+                                                cmd));
+            return Report_::Wait;
+        }     
     }
     std::string full{cmd};
     full += '\r';
@@ -463,7 +607,7 @@ auto AVRHandler::Send(std::string_view cmd) -> Report_ {
 
 std::string AVRHandler::MakeCommand(std::string cmd, std::optional<int> num) const {
     if (num) {      //TODO: reevaluate if any usecase other than adding num occur
-        if (cmd.compare(denon_cmd::volumeprefix) == 0) {
+        if (cmd.compare(denon_cmd::volume_prefix) == 0) {
             cmd += dbtostring(*num);
         }
         else {
@@ -541,12 +685,38 @@ void AVRHandler::Print(Verbosity level, std::string_view msg) const {
 
 void AVRHandler::PrintStates(Verbosity level) {
     if (verbosity_ < level) return;
-    std::cout <<             "States:    | Requested | Commanded | Reported   \n";
-    std::cout <<             "===============================================\n";
-    std::cout << std::format("volume:    | {:+6.1f} db | {:+6.1f} db | {:+6.1f} db\n", 
-                             requested_.volume / 10.0, commanded_.volume / 10.0, 
-                             reported_.volume / 10.0);
-    std::cout << std::format("maxvolume: | {:+6.1f} db | {:+6.1f} db | {:+6.1f} db\n", 
-                             requested_.maxvolume / 10.0, commanded_.maxvolume / 10.0, 
-                             reported_.maxvolume / 10.0);
+    int w1 = 13;
+    int w2 = w1 - 3;
+    std::cout <<             "States:         |   Requested   |   Commanded   |   Reported   \n";
+    std::cout <<             "===============================================================\n";
+    std::cout << std::format("input/source  : | {: >{}} | {: >{}} | {: >{}}\n",
+                             requested_.input.substr(0, w1), w1, commanded_.input.substr(0, w1), w1,
+                             reported_.input.substr(0, w1), w1);
+    std::cout << std::format("surround mode : | {: >{}} | {: >{}} | {: >{}}\n",
+                             requested_.surround.substr(0, w1), w1, commanded_.surround.substr(0, w1), 
+                             w1, reported_.surround.substr(0, w1), w1);
+    std::cout << std::format("volume:         | {:+{}.1f} db | {:+{}.1f} db | {:+{}.1f} db\n", 
+                             requested_.volume / 10.0, w2, commanded_.volume / 10.0, w2, 
+                             reported_.volume / 10.0, w2);
+    std::cout << std::format("maxvolume:      | {:+{}.1f} db | {:+{}.1f} db | {:+{}.1f} db\n", 
+                             requested_.maxvolume / 10.0, w2, commanded_.maxvolume / 10.0, w2, 
+                             reported_.maxvolume / 10.0, w2);
+    std::cout << std::format("chanvol FL:     | {:+{}.1f} db | {:+{}.1f} db | {:+{}.1f} db\n", 
+                             requested_.chanvol.FL / 10.0, w2, commanded_.chanvol.FL / 10.0, w2, 
+                             reported_.chanvol.FL / 10.0, w2);
+    std::cout << std::format("chanvol FR:     | {:+{}.1f} db | {:+{}.1f} db | {:+{}.1f} db\n", 
+                             requested_.chanvol.FR / 10.0, w2, commanded_.chanvol.FR / 10.0, w2, 
+                             reported_.chanvol.FR / 10.0, w2);
+    std::cout << std::format("chanvol C:      | {:+{}.1f} db | {:+{}.1f} db | {:+{}.1f} db\n", 
+                             requested_.chanvol.C / 10.0, w2, commanded_.chanvol.C / 10.0, w2, 
+                             reported_.chanvol.C / 10.0, w2);
+    std::cout << std::format("chanvol SW:     | {:+{}.1f} db | {:+{}.1f} db | {:+{}.1f} db\n", 
+                             requested_.chanvol.SW / 10.0, w2, commanded_.chanvol.SW / 10.0, w2, 
+                             reported_.chanvol.SW / 10.0, w2); 
+    std::cout << std::format("chanvol SL:     | {:+{}.1f} db | {:+{}.1f} db | {:+{}.1f} db\n", 
+                             requested_.chanvol.SL / 10.0, w2, commanded_.chanvol.SL / 10.0, w2, 
+                             reported_.chanvol.SL / 10.0, w2);
+    std::cout << std::format("chanvol SR:     | {:+{}.1f} db | {:+{}.1f} db | {:+{}.1f} db\n", 
+                             requested_.chanvol.SR / 10.0, w2, commanded_.chanvol.SR / 10.0, w2, 
+                             reported_.chanvol.SR / 10.0, w2);
 }

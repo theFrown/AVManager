@@ -9,8 +9,19 @@
 enum class Verbosity { Silent, Error, Warning, Info, Debug, Trace};
 
 struct DenonState {
-    int volume; //in 0.1db increments: 10dB stored as 100, 10.5db as 105
+    std::string input;
+    std::string surround;
+    int volume; //all volumes stored in 0.1db increments: 10dB stored as 100, 10.5db as 105
     int maxvolume;
+    struct ChanVol {
+        int FL;
+        int FR;
+        int C;
+        int SW;
+        int SL;
+        int SR;
+        bool operator==(const ChanVol&) const = default;
+    } chanvol;
     bool operator==(const DenonState&) const = default;
 };
 
@@ -45,6 +56,8 @@ private:
     std::array<char, inbufferlen_ + 1> inbuffer_;
     std::string inchain_;
     std::string inmessage_;
+    std::string_view signal_;
+    bool signal_received_ = false;
     SOCKET socket_ = INVALID_SOCKET;
     sockaddr_in sockaddr_;
     Verbosity verbosity_;
@@ -58,9 +71,12 @@ private:
     TimePoint_ command_cooldown_;
     TimePoint_ response_deadline_;
 
-    Report_ ControlReceive();
+    Report_ ControlResync();
+    Report_ ControlReceive(int time_out = 0);
     Report_ SyncIn();
-    Report_ SyncInOne(std::string_view message, std::string_view prefix, 
+    Report_ SyncInString(std::string_view message, std::string_view prefix, 
+                      std::string_view report_string, std::string& report_slot);
+    Report_ SyncInDb(std::string_view message, std::string_view prefix, 
                       std::string_view report_string, int& report_slot);
     Report_ SyncOut();
     Report_ SyncResolve();
@@ -69,7 +85,7 @@ private:
     Report_ CheckIncoming(int time_out = 0);
     Report_ Receive();
     Report_ Parse();
-    Report_ Send(std::string_view cmd);
+    Report_ Send(std::string_view cmd, bool wait = false);
     std::string MakeCommand(std::string cmd, std::optional<int> num = std::nullopt) const;
     std::string dbtostring(int db) const;
     std::optional<int> stringtodb(std::string_view str) const;
