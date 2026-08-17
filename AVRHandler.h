@@ -42,7 +42,7 @@ public:
 
 private:
     enum class Report_ { OK, Data, NoData, Wait, Unknown, BadInput, Disconnected, SocketError };
-    enum class InCharge_ { Request, Report };
+    enum class ControlMode_ { Request, Report, Rest };
     using Clock_ = std::chrono::steady_clock;
     using TimePoint_ = Clock_::time_point;
     using MilliSeconds_ = std::chrono::milliseconds;
@@ -52,7 +52,7 @@ private:
     constexpr static size_t inbufferlen_ = 270; //2x denon message max size (135 chars)
     const MilliSeconds_ cooldown_default_{50};
     const MilliSeconds_ patience_default_{200};
-
+    
     std::array<char, inbufferlen_ + 1> inbuffer_;
     std::string inchain_;
     std::string inmessage_;
@@ -61,11 +61,11 @@ private:
     SOCKET socket_ = INVALID_SOCKET;
     sockaddr_in sockaddr_;
     Verbosity verbosity_;
-    InCharge_ in_charge_ = InCharge_::Report;
+    ControlMode_ control_mode_ = ControlMode_::Report;
     DenonState requested_ = {};
     DenonState commanded_ = {};
     DenonState reported_ = {};
-    bool fully_synced_ = false;
+    int failed_syncs_ = 0;
     bool connection_healthy_ = false;
     bool connection_shutting_down_ = false;
     TimePoint_ command_cooldown_;

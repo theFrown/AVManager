@@ -5,6 +5,8 @@
 #include <format>
 #include <chrono>
 #include <thread>
+#include <string>
+#include <cmath>
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include "AVRHandler.h"
@@ -41,7 +43,7 @@ AVRHandler::~AVRHandler() {
             bool listening = true;
             connection_shutting_down_ = true;
             while (listening) {
-                coms_response = ControlReceive();
+                coms_response = ControlReceive(10);
                 if (coms_response == Report_::Disconnected) {
                     Print("Connection shutdown confirmed");
                     listening = false;
@@ -59,9 +61,9 @@ AVRHandler::~AVRHandler() {
         else {
             Print(Verbosity::Warning, std::format("Socket shutdown failed with response:\n    {}\n"
                                                   "    proceding with hard shutdown\n", response));
-            BOOL value = TRUE;
+            linger value{.l_onoff = 1, .l_linger = 0};
             const char* value_byteaddress = reinterpret_cast<const char*>(&value);
-            setsockopt(socket_, SOL_SOCKET, SO_DONTLINGER, value_byteaddress, sizeof(value));
+            setsockopt(socket_, SOL_SOCKET, SO_LINGER, value_byteaddress, sizeof(value));
         }
         closesocket(socket_);
     }
@@ -69,10 +71,15 @@ AVRHandler::~AVRHandler() {
 }
 
 int AVRHandler::ControlLoop() {
+    Report_ response = ControlResync();
+    if (response != Report_::OK) {
+        return 1; //issue with syncing
+    }
+    
     auto test_deadline = Clock_::now() + MilliSeconds_(50);
     int test_stage = 0;
     // int test_db = -300;
-    Report_ response{Report_::Unknown};
+    
     while (stayalive) {
 
         //test infrastructure below v v
@@ -81,19 +88,19 @@ int AVRHandler::ControlLoop() {
                 case 0:
                     Print("\n-------volume to -35db-------\n\n");
                     requested_.volume = -350;
-                    in_charge_ = InCharge_::Request;
+                    control_mode_ = ControlMode_::Request;
                     test_deadline = Clock_::now() + MilliSeconds_(10000);
                     break;
                 case 1:
                     Print("\n------------volume to -26db------------\n\n");
                     requested_.volume = -260;
-                    in_charge_ = InCharge_::Request;
+                    control_mode_ = ControlMode_::Request;
                     test_deadline = Clock_::now() + MilliSeconds_(2500);
                     break;
                 case 2:
                     Print("\n------------volume up to -30db------------\n\n");
                     requested_.volume = -300;
-                    in_charge_ = InCharge_::Request;
+                    control_mode_ = ControlMode_::Request;
                     test_deadline = Clock_::now() + MilliSeconds_(2500);
                     break;
                 // case 3:
@@ -113,7 +120,7 @@ int AVRHandler::ControlLoop() {
                 // case 5:
                 //     Print("\n------------corruption test: set volume to -31db------------\n\n");
                 //     requested_.volume = -310;
-                //     in_charge_ = InCharge_::Request;
+                //     control_mode_ = ControlMode_::Request;
                 //     test_deadline = Clock_::now() + MilliSeconds_(1000);
                 //     break;
                 // case 6:
@@ -124,7 +131,7 @@ int AVRHandler::ControlLoop() {
                 // case 7:
                 //     Print("\n------------corruption test: set volume to -30db------------\n\n");
                 //     requested_.volume = -300;
-                //     in_charge_ = InCharge_::Request;
+                //     control_mode_ = ControlMode_::Request;
                 //     test_deadline = Clock_::now() + MilliSeconds_(150);
                 //     break;
                 // case 8:
@@ -135,7 +142,7 @@ int AVRHandler::ControlLoop() {
                 // case 9:
                 //     Print("\n------------corruption test: set volume to -31db------------\n\n");
                 //     requested_.volume = -310;
-                //     in_charge_ = InCharge_::Request;
+                //     control_mode_ = ControlMode_::Request;
                 //     test_deadline = Clock_::now() + MilliSeconds_(10);
                 //     break;
                 // case 10:
@@ -154,20 +161,26 @@ int AVRHandler::ControlLoop() {
         //receiving: making sure reported_ is up-to-date through SyncIn
         response = ControlReceive(10);
         if ((response == Report_::SocketError) || (response == Report_::Disconnected)) {
-            return 1; //issue in receive loop
+            return 2; //issue in receive loop
         }
 
         //sending: making sure commanded_ is up-to-date through SyncOut
         if ((commanded_ != requested_) && (Clock_::now() > command_cooldown_)) {
             response = SyncOut();
             if (response != Report_::OK) {
-                return 2; //problem with Send
+                return 3; //problem with Send
             }
         }
 
         //closing the loop: making sure commanded_ and reported_ reconcile
-        if (!fully_synced_) { 
+        if (control_mode_ != ControlMode_::Rest) { 
             response = SyncResolve();
+            if (response == Report_::Unknown) {
+                response = ControlResync();
+                if (response != Report_::OK) {
+                    return 1; //issue with syncing
+                }
+            }
         }
     }
     return 0;
@@ -266,22 +279,25 @@ auto AVRHandler::ControlResync() -> Report_ {
                 if ((response == Report_::SocketError) || (response == Report_::Disconnected)) {
                     return response;
                 }
-                if (Clock_::now() > deadline) {
-                    Print(Verbosity::Warning, std::format("Sync stage {} timed out\n", stage)); 
-                    sent = false;
-                    attempt++;
-                }
                 if (signal_received_) {
                     Print(Verbosity::Trace, "Parameter successfully synced\n");
                     succeeded = true;
                     break;
                 }
+                else if (Clock_::now() > deadline) {
+                    Print(Verbosity::Warning, std::format("Sync stage {} timed out\n", stage)); 
+                    sent = false;
+                    attempt++;
+                }
             }
         }
-        if (!succeeded) return Report_::Unknown;
+        if (!succeeded) {
+            Print(Verbosity::Warning, std::format("Resync failed, exceeded retry attempts for stage {}\n", stage));
+            return Report_::Unknown; //TODO: see if it's worth adding a 'timeout' return value
+        }
     }
-    Print(Verbosity::Debug, "Syncing succesful, state parameters now:\n");
-    PrintStates(Verbosity::Debug);
+    Print(Verbosity::Info, "Full resync succesful, state parameters now:\n");
+    PrintStates(Verbosity::Info);
     return Report_::OK;
 }
 
@@ -293,11 +309,13 @@ auto AVRHandler::ControlReceive(int time_out) -> Report_ {
         if ((response == Report_::SocketError) || (response == Report_::Disconnected)) return response;
     }
     if (inchain_.empty()) return response; //draining inchain_ is more important than transparency
-    while ((response = Parse()) == Report_::Data) { //TODO: what if it returns Report_::Wait?
-        response = SyncIn();
-        if (inchain_.empty() && response != Report_::OK) return response;
+    while ((response = Parse()) != Report_::NoData) { //effectively: if there's something in inchain_ worth parsing
+        if (!inmessage_.empty()) {
+          response = SyncIn();
+          if (inchain_.empty() && response != Report_::OK) return response;
+        }
     }
-    return response; //NB: this will always contain the response from Parse
+    return Report_::OK;
 }
 
 auto AVRHandler::SyncIn() -> Report_ {
@@ -367,12 +385,14 @@ auto AVRHandler::SyncIn() -> Report_ {
 }
 
 auto AVRHandler::SyncInString(std::string_view message, std::string_view prefix, 
-                           std::string_view report_string, std::string& report_slot) -> Report_ {
+                              std::string_view report_string, std::string& report_slot) -> Report_ {
     std::string_view params = message.substr(prefix.size());
     Print(Verbosity::Debug, std::format("Denon reports {} set to {}\n", report_string, params));
     if (params != report_slot){
         report_slot = params;
-        fully_synced_ = false;
+        if (control_mode_ != ControlMode_::Request) {
+            control_mode_ = ControlMode_::Report;
+        }
         PrintStates(Verbosity::Debug);
     }
     else {
@@ -382,7 +402,7 @@ auto AVRHandler::SyncInString(std::string_view message, std::string_view prefix,
 }
 
 auto AVRHandler::SyncInDb(std::string_view message, std::string_view prefix, 
-                           std::string_view report_string, int& report_slot) -> Report_ {
+                          std::string_view report_string, int& report_slot) -> Report_ {
     std::string_view params = message.substr(prefix.size());
     auto num = stringtodb(params);
     if (!num) {
@@ -391,9 +411,11 @@ auto AVRHandler::SyncInDb(std::string_view message, std::string_view prefix,
         return Report_::BadInput;
     }
     Print(Verbosity::Debug, std::format("Denon reports {} {:+} db\n", report_string, *num / 10.0));
-    if (*num != report_slot){
+    if (*num != report_slot) {
         report_slot = *num;
-        fully_synced_ = false;
+        if (control_mode_ != ControlMode_::Request) {
+            control_mode_ = ControlMode_::Report;
+        }
         PrintStates(Verbosity::Debug);
     }
     else {
@@ -403,18 +425,16 @@ auto AVRHandler::SyncInDb(std::string_view message, std::string_view prefix,
 }
 
 auto AVRHandler::SyncOut() -> Report_ {
-    Report_ response{Report_::Unknown};
+    Report_ response = Report_::Unknown;
     if (commanded_.volume != requested_.volume) {
-        fully_synced_ = false;
-        in_charge_ = InCharge_::Request;
+        control_mode_ = ControlMode_::Request;
         response = Send(MakeCommand(denon_cmd::volume_prefix, requested_.volume));
         if (response == Report_::OK) {
             commanded_.volume = requested_.volume;
         }
     }
     else if (commanded_.maxvolume != requested_.maxvolume) {
-        fully_synced_ = false;
-        in_charge_ = InCharge_::Request;
+        control_mode_ = ControlMode_::Request;
         response = Send(MakeCommand(denon_cmd::volume_maxprefix, requested_.maxvolume));
         if (response == Report_::OK) {
             commanded_.maxvolume = requested_.maxvolume;
@@ -425,32 +445,48 @@ auto AVRHandler::SyncOut() -> Report_ {
 }
 
 auto AVRHandler::SyncResolve() -> Report_ {
-    if (in_charge_ == InCharge_::Request) {
+    if (control_mode_ == ControlMode_::Request) {
         if (Clock_::now() < response_deadline_) { 
             return Report_::Wait;
         }
         else {
             if ((reported_ == commanded_ ) && (commanded_ == requested_)) {
                 Print(Verbosity::Info, "All Commands succesfully sent and confirmed\n");
-                fully_synced_ = true;
-                in_charge_ = InCharge_::Report;
+                failed_syncs_ = 0;
+                control_mode_ = ControlMode_::Rest;
                 return Report_::OK;
             }
             else {
-                Print(Verbosity::Warning, "One or more commands have not been correctly reported back\n    "
-                    "    Ignoring unconfirmed commands and reverting to Requested state.\n");
+                failed_syncs_++;
                 commanded_ = reported_;  //forces desync between requested_ and commanded_
-                PrintStates(Verbosity::Debug);
-                return Report_::Data;
+                if (failed_syncs_ > 5) {
+                    Print(Verbosity::Warning, "Sync attempts keep failing, forcing a full Resync from AVR\n"
+                                              "    Resetting unconfirmed commands as unsent.\n");
+                    failed_syncs_ = 0;
+                    return Report_::Unknown;
+                }
+                else {
+                    Print(Verbosity::Warning, "One or more commands have not been correctly reported back\n"
+                                              "    Resetting unconfirmed commands as unsent.\n");
+                    PrintStates(Verbosity::Debug);
+                    return Report_::Data;
+                }
             }
         }
     }
     else {
-        Print(Verbosity::Info, "State succesfully updated by AVR-originated change\n");
+        if (control_mode_ == ControlMode_::Report) {
+            Print(Verbosity::Info, "State succesfully updated by AVR-originated change\n");
+        }
+        else {
+            Print(Verbosity::Warning, "SyncResolve called for unknown reasons,\n"
+                                      "    harmonizig all states to reported state\n");
+        }
         commanded_ = requested_ = reported_;
-        fully_synced_ = true;
-        PrintStates(Verbosity::Debug);
+        failed_syncs_ = 0;
         response_deadline_ = Clock_::now();
+        control_mode_ = ControlMode_::Rest;
+        PrintStates(Verbosity::Debug);
         return Report_::OK;
     }
 }
@@ -619,7 +655,7 @@ std::string AVRHandler::MakeCommand(std::string cmd, std::optional<int> num) con
 
 std::string AVRHandler::dbtostring(int db) const {
     std::string result;
-    db = static_cast<int>(round(db / 5.0)) * 5;
+    db = static_cast<int>(std::round(db / 5.0)) * 5;
     db += 800;
     if (db <= 0) {
         result = "00";
