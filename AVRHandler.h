@@ -8,6 +8,25 @@
 
 enum class Verbosity { Silent, Error, Warning, Info, Debug, Trace};
 
+class VerbosityOverride {
+private:
+    Verbosity& original_slot_;
+    Verbosity original_value_;
+public:
+    VerbosityOverride(Verbosity& original, Verbosity temp_level) 
+        : original_slot_(original), original_value_(original) 
+    {
+        original_slot_ = temp_level; 
+    }
+    ~VerbosityOverride() { 
+        original_slot_ = original_value_; 
+    }
+    VerbosityOverride(const VerbosityOverride&) = delete;
+    VerbosityOverride(VerbosityOverride&&) = delete;
+    VerbosityOverride& operator=(const VerbosityOverride&) = delete;
+    VerbosityOverride& operator=(VerbosityOverride&&) = delete;
+};
+
 struct DenonState {
     std::string input;
     std::string surround;
@@ -28,17 +47,16 @@ struct DenonState {
 class AVRHandler {
 public:
     AVRHandler(Verbosity verbosity = Verbosity::Info);
+    ~AVRHandler();
     AVRHandler(const AVRHandler&) = delete;
     AVRHandler(AVRHandler&&) = delete;
     AVRHandler& operator=(const AVRHandler&) = delete;
     AVRHandler& operator=(AVRHandler&&) = delete;
-    ~AVRHandler();
 
     bool stayalive = false;
     int status;
 
     int ControlLoop();
-    int testcoms();
 
 private:
     enum class Report_ { OK, Data, NoData, Wait, Unknown, BadInput, Disconnected, SocketError };
@@ -73,6 +91,7 @@ private:
 
     Report_ ControlResync();
     Report_ ControlReceive(int time_out = 0);
+    Report_ ControlPoll(bool block =true,  int time_out = 1000);
     Report_ SyncIn();
     Report_ SyncInString(std::string_view message, std::string_view prefix, 
                       std::string_view report_string, std::string& report_slot);

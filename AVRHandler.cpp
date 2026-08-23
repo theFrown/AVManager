@@ -186,43 +186,43 @@ int AVRHandler::ControlLoop() {
     return 0;
 }
 
-int AVRHandler::testcoms() {
-    Verbosity verbosity_backup = verbosity_;
-    verbosity_ = Verbosity::Trace;
-    // Print(Verbosity::Debug, "Sending test command to AVR\n");
-    // PrintStates(Verbosity::Debug);
-    //int response = Send(MakeCommand(denon_cmd::volumeprefix, -200));
-    // Report_ response = Send(denon_cmd::volume_status);
-    Report_ response = ControlResync();
-    if (response != Report_::OK) {
-        verbosity_ = verbosity_backup;
-        return 1;
+auto AVRHandler::ControlPoll(bool block, int time_out) -> Report_ {
+    Print(Verbosity::Debug, "Sending test command to AVR\n");
+    Report_ response = Send(denon_cmd::volume_status, block);
+    signal_ = denon_cmd::volume_maxprefix;
+    signal_received_ = false;
+    bool succeeded = false;
+    if ((!block) || (response != Report_::OK)) {
+        return response;
     }
-    // for (int i = 0; i < 20; i++) {
-    //     if (CheckIncoming(10) == Report_::Data) {
-    //         response = Receive();
-    //         if (response != Report_::Data) {
-    //             verbosity_ = verbosity_backup;
-    //             return 2;
-    //         }
-    //         while (inchain_.size() > 0) {
-    //             response = Parse();
-    //             if (response != Report_::Data) {
-    //                 verbosity_ = verbosity_backup;
-    //                 return 3;
-    //             }
-    //             response = SyncIn();
-    //             if (response != Report_::OK) {
-    //                 verbosity_ = verbosity_backup;
-    //                 return 4;
-    //             }
-    //         }
-    //     }
-    // }
-    // PrintStates(Verbosity::Debug);
-    verbosity_ = verbosity_backup;
-    return 0;
+    else {
+        if (time_out > 0) {
+            Print(Verbosity::Debug, std::format("Waiting until we receive expected respone (up to {} ms)", time_out));
+            auto deadline = Clock_::now() + MilliSeconds_(time_out);
+        }
+        else {
+            Print(Verbosity::Debug, "Waiting until we receive expected respone");
+        }
+        while (!signal_received_) {
+            response = ControlReceive(10);
+            if ((response == Report_::SocketError) || (response == Report_::Disconnected)) {
+                return response;
+            }
+            if (signal_received_) {
+                Print(Verbosity::Trace, "Parameter successfully synced\n");
+                succeeded = true;
+                break;
+            }
+            else if (Clock_::now() > deadline) {
+                Print(Verbosity::Warning, std::format("Sync stage {} timed out\n", stage)); 
+                sent = false;
+                attempt++;
+            }
+            if ((time_out > 0)
+        }
+    }
 }
+
 
 auto AVRHandler::ControlResync() -> Report_ {
     Print("Syncing all parameters from the AVR\n");
