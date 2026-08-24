@@ -82,7 +82,7 @@ int AVRHandler::ControlLoop() {
     
     auto test_deadline = Clock_::now() + MilliSeconds_(50);
     int test_stage = 0;
-    // int test_db = -300;
+    int test_db = -300;
     
     while (stayalive) {
 
@@ -90,69 +90,74 @@ int AVRHandler::ControlLoop() {
         if (Clock_::now() > test_deadline) {
             switch (test_stage) {
                 case 0:
-                    Print("\n-------volume to -35db-------\n\n");
-                    requested_.volume = -350;
-                    control_mode_ = ControlMode_::Request;
-                    test_deadline = Clock_::now() + MilliSeconds_(10000);
+                    Print("\n-------waiting for straggler messages-------\n\n");
+                    test_deadline = Clock_::now() + MilliSeconds_(5000);
                     break;
                 case 1:
-                    Print("\n------------volume to -26db------------\n\n");
+                    Print("\n------------volume up to -26db------------\n\n");
                     requested_.volume = -260;
                     control_mode_ = ControlMode_::Request;
                     test_deadline = Clock_::now() + MilliSeconds_(2500);
                     break;
                 case 2:
-                    Print("\n------------volume up to -30db------------\n\n");
+                    Print("\n------------volume down to -31db------------\n\n");
+                    requested_.volume = -310;
+                    control_mode_ = ControlMode_::Request;
+                    test_deadline = Clock_::now() + MilliSeconds_(2500);
+                    break;
+                case 3:
+                    if (test_db > -400) {
+                        Print("\n------------sending rapid commands (-30db to -40db)------------\n\n");
+                        test_stage--; //keeps us in case 4
+                        test_db -= 5;
+                        requested_.volume = test_db;
+                        control_mode_ = ControlMode_::Request;
+                        // inchain_.append(std::format("MV{}|",dbtostring(test_db)));
+                    }
+                    test_deadline = Clock_::now() + MilliSeconds_(10);
+                    break;
+                case 4:
+                    Print("\n--------purging any remaining incoming messages-----------\n");
+                    test_deadline = Clock_::now() + MilliSeconds_(5000);
+                    break;
+                case 5:
+                    Print("\n--------corruption test 1: set volume to -30 db-----\n\n");
                     requested_.volume = -300;
                     control_mode_ = ControlMode_::Request;
                     test_deadline = Clock_::now() + MilliSeconds_(2500);
                     break;
-                // case 3:
-                //     Print("\n------------injecting denon report to -29db------------\n\n");
-                //     inchain_.append("MV51|");
-                //     test_deadline = Clock_::now() + MilliSeconds_(1000);
-                //     break;
-                // case 4:
-                //     if (test_db > -400) {
-                //         Print("\n------------injecting rapid denon reports (-30db to -40db)------------\n\n");
-                //         test_stage--; //keeps us in case 4
-                //         test_db -= 5;
-                //         inchain_.append(std::format("MV{}|",dbtostring(test_db)));
-                //     }
-                //     test_deadline = Clock_::now() + MilliSeconds_(10);
-                //     break;
-                // case 5:
-                //     Print("\n------------corruption test: set volume to -31db------------\n\n");
-                //     requested_.volume = -310;
-                //     control_mode_ = ControlMode_::Request;
-                //     test_deadline = Clock_::now() + MilliSeconds_(1000);
-                //     break;
-                // case 6:
-                //     Print("\n------------injecting bad denon report after 1000ms------------\n\n");
-                //     inchain_.append("MV41|");
-                //     test_deadline = Clock_::now() + MilliSeconds_(1000);
-                //     break;
+                case 6:
+                    Print("\n--------corruption test 1: set volume to -31 db--------\n\n");
+                    requested_.volume = -310;
+                    control_mode_ = ControlMode_::Request;
+                    test_deadline = Clock_::now() + MilliSeconds_(150);
+                    break;
+                case 7:
+                    Print("\n--------corruption test 1: modify commanded_ after 150ms-----\n\n");
+                    commanded_.volume = -250;
+                    test_deadline = Clock_::now() + MilliSeconds_(5000);
+                    break;
                 // case 7:
-                //     Print("\n------------corruption test: set volume to -30db------------\n\n");
+                //     Print("\n--------corruption test 3: set volume to -30db---------\n\n");
                 //     requested_.volume = -300;
                 //     control_mode_ = ControlMode_::Request;
                 //     test_deadline = Clock_::now() + MilliSeconds_(150);
                 //     break;
                 // case 8:
-                //     Print("\n------------injecting denon report after 150ms------------\n\n");
+                //     Print("\n--------corruption test 3: injecting denon report after 150ms--------\n\n");
                 //     inchain_.append("MV42|");
-                //     test_deadline = Clock_::now() + MilliSeconds_(1000);
+                //     test_deadline = Clock_::now() + MilliSeconds_(5000);
                 //     break;
                 // case 9:
-                //     Print("\n------------corruption test: set volume to -31db------------\n\n");
+                //     Print("\n--------corruption test 4: set volume to -31db--------\n\n");
                 //     requested_.volume = -310;
                 //     control_mode_ = ControlMode_::Request;
                 //     test_deadline = Clock_::now() + MilliSeconds_(10);
                 //     break;
                 // case 10:
-                //     Print("\n------------injecting denon report after 10ms------------\n\n");
+                //     Print("\n---------corruption test 4: injecting denon report after 10ms---------\n\n");
                 //     inchain_.append("MV41|");
-                //     test_deadline = Clock_::now() + MilliSeconds_(2000);
+                //     test_deadline = Clock_::now() + MilliSeconds_(5000);
                 //     break;
                 default:
                     stayalive = false;
@@ -469,24 +474,31 @@ auto AVRHandler::SyncResolve() -> Report_ {
             return Report_::Wait;
         }
         else {
-            if ((reported_ == commanded_ ) && (commanded_ == requested_)) {
-                Print(Verbosity::Info, "All Commands succesfully sent and confirmed\n");
+            if (reported_ == requested_) {
+                if (commanded_ == requested_) {
+                    Print(Verbosity::Info, "All Commands succesfully sent and confirmed\n");
+                }
+                else { //current loop design should make this impossible
+                    Print(Verbosity::Info, "Reported state matches requested state, despite pending"
+                                           "commands\n    ignoring unconfirmed commands.\n");
+                    commanded_ = requested_;
+                }
                 failed_syncs_ = 0;
                 control_mode_ = ControlMode_::Rest;
                 return Report_::OK;
             }
             else {
                 failed_syncs_++;
-                commanded_ = reported_;  //forces desync between requested_ and commanded_
                 if (failed_syncs_ > 5) {
-                    Print(Verbosity::Warning, "Sync attempts keep failing, forcing a full Resync from AVR\n"
-                                              "    Resetting unconfirmed commands as unsent.\n");
+                    Print(Verbosity::Warning, "Sync attempts keep failing, forcing a full Resync "
+                                              "from AVR\n");
                     failed_syncs_ = 0;
                     return Report_::Unknown;
                 }
                 else {
-                    Print(Verbosity::Warning, "One or more commands have not been correctly reported back\n"
-                                              "    Resetting unconfirmed commands as unsent.\n");
+                    Print(Verbosity::Warning, "One or more commands have not been correctly reported "
+                                              "back\n    Resending any unconfirmed commands.\n");
+                    commanded_ = reported_;  //forces desync between requested_ and commanded_
                     PrintStates(Verbosity::Debug);
                     return Report_::Data;
                 }
