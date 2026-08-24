@@ -1,5 +1,6 @@
 #pragma once
 
+#include <iostream>
 #include <array>
 #include <string>
 #include <chrono>
@@ -16,6 +17,9 @@ public:
     VerbosityOverride(Verbosity& original, Verbosity temp_level) 
         : original_slot_(original), original_value_(original) 
     {
+        if (temp_level >= Verbosity::Info) {
+            std::cout << "Temporarily overriding verbosity level\n"; 
+        }
         original_slot_ = temp_level; 
     }
     ~VerbosityOverride() { 
@@ -28,6 +32,7 @@ public:
 };
 
 struct DenonState {
+    std::string power;
     std::string input;
     std::string surround;
     int volume; //all volumes stored in 0.1db increments: 10dB stored as 100, 10.5db as 105
@@ -91,7 +96,7 @@ private:
 
     Report_ ControlResync();
     Report_ ControlReceive(int time_out = 0);
-    Report_ ControlPoll(bool block =true,  int time_out = 1000);
+    Report_ ControlPing(bool silent = true, bool block = true, int time_out = 1000);
     Report_ SyncIn();
     Report_ SyncInString(std::string_view message, std::string_view prefix, 
                       std::string_view report_string, std::string& report_slot);

@@ -1,6 +1,11 @@
 #pragma once
 
 namespace denon_cmd {
+    constexpr const char* power_prefix  = "PW";
+    constexpr const char* power_status  = "PW?";
+    constexpr const char* power_on      = "PWON";
+    constexpr const char* power_standby = "PWSTANDBY";
+
     constexpr const char* volume_prefix    = "MV";
     constexpr const char* volume_status    = "MV?";
     constexpr const char* volume_up        = "MVUP";
@@ -26,7 +31,10 @@ namespace denon_cmd {
     constexpr const char* surround_matrix = "MSMATRIX";
 
     /*
-    example responses to "SI?|"
+    example response to "PW?|":
+    PWON|
+
+    example responses to "SI?|":
     SITV|
     SVOFF|
     SVSAT/CBL|
@@ -37,7 +45,7 @@ namespace denon_cmd {
     OPALSVAL 000|
     SYSDA PCM                  |
     
-    example responses to "MS?|"
+    example responses to "MS?|":
     MS MULTI CH IN|
     PSDRC OFF|
     PSLFE 00|
@@ -50,11 +58,11 @@ namespace denon_cmd {
     SYSDA PCM                  |
     OPINFASP 22222200000000000000000000000000|
 
-    example responses to "MV?|"
+    example responses to "MV?|":
     MV50|
     MVMAX 85|
 
-    example responses to "CV?|"
+    example responses to "CV?|":
     CVFL 50|
     CVFR 50|
     CVC 54|
