@@ -62,6 +62,9 @@ public:
     int status;
 
     int ControlLoop();
+    static std::string dbtostring(int db_tenths, int zero = 800, int min = 0, int max = 980);
+    static std::optional<int> stringtodb(std::string_view str, int zero = 800);
+    static std::string printdb(int value, int width = 0);
 
 private:
     enum class Report_ { OK, Data, NoData, Wait, Unknown, BadInput, Disconnected, SocketError };
@@ -111,8 +114,6 @@ private:
     Report_ Parse();
     Report_ Send(std::string_view cmd, bool wait = false);
     std::string MakeCommand(std::string cmd, std::optional<int> num = std::nullopt) const;
-    std::string dbtostring(int db) const;
-    std::optional<int> stringtodb(std::string_view str) const;
     void Print(Verbosity level, std::string_view msg) const;
     void Print(std::string_view msg) const { Print(Verbosity::Info, msg); }
     void PrintStates(Verbosity level);

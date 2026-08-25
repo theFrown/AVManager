@@ -370,27 +370,27 @@ auto AVRHandler::SyncIn() -> Report_ {
             return Report_::OK;
         }
         else if (message.starts_with(denon_cmd::chanvol_FL_prefix)) {
-            return (SyncInDb(message, denon_cmd::chanvol_FL_prefix, "FL volume", 
+            return (SyncInDb(message, denon_cmd::chanvol_FL_prefix, "FL offset", 
                     reported_.chanvol.FL));
         }
         else if (message.starts_with(denon_cmd::chanvol_FR_prefix)) {
-            return (SyncInDb(message, denon_cmd::chanvol_FR_prefix, "FR volume", 
+            return (SyncInDb(message, denon_cmd::chanvol_FR_prefix, "FR offset", 
                     reported_.chanvol.FR));
         }
         else if (message.starts_with(denon_cmd::chanvol_C_prefix)) {
-            return (SyncInDb(message, denon_cmd::chanvol_C_prefix, "C volume", 
+            return (SyncInDb(message, denon_cmd::chanvol_C_prefix, "C offset", 
                     reported_.chanvol.C));
         }
         else if (message.starts_with(denon_cmd::chanvol_SW_prefix)) {
-            return (SyncInDb(message, denon_cmd::chanvol_SW_prefix, "SW volume", 
+            return (SyncInDb(message, denon_cmd::chanvol_SW_prefix, "SW offset", 
                     reported_.chanvol.SW));
         }
         else if (message.starts_with(denon_cmd::chanvol_SL_prefix)) {
-            return (SyncInDb(message, denon_cmd::chanvol_SL_prefix, "SL volume", 
+            return (SyncInDb(message, denon_cmd::chanvol_SL_prefix, "SL offset", 
                     reported_.chanvol.SL));
         }
         else if (message.starts_with(denon_cmd::chanvol_SR_prefix)) {
-            return (SyncInDb(message, denon_cmd::chanvol_SR_prefix, "SR volume", 
+            return (SyncInDb(message, denon_cmd::chanvol_SR_prefix, "SR offset", 
                     reported_.chanvol.SR));
         }
         else {
@@ -424,17 +424,20 @@ auto AVRHandler::SyncInString(std::string_view message, std::string_view prefix,
 
 auto AVRHandler::SyncInDb(std::string_view message, std::string_view prefix, 
                           std::string_view report_string, int& report_slot) -> Report_ {
-    
-    //TODO: Fix incoming db for channel volume using different scale than main volume
-
     std::string_view params = message.substr(prefix.size());
-    auto num = stringtodb(params);
+    std::optional<int> num;
+    if (prefix.starts_with(denon_cmd::chanvol_prefix)) {
+        num = stringtodb(params, 500);
+    }
+    else {
+        num = stringtodb(params);
+    }
     if (!num) {
         Print(Verbosity::Warning, std::format("Parsing incoming message [{}] failed.\n    params [{}]"
                                               " do not convert cleanly to an int\n", prefix, params));
         return Report_::BadInput;
     }
-    Print(Verbosity::Debug, std::format("Denon reports {} {:+} db\n", report_string, *num / 10.0));
+    Print(Verbosity::Debug, std::format("Denon reports {} set to {}\n", report_string, printdb(*num)));
     if (*num != report_slot) {
         report_slot = *num;
         if (control_mode_ != ControlMode_::Request) {
@@ -458,11 +461,8 @@ auto AVRHandler::SyncOut() -> Report_ {
         }
     }
     else if (commanded_.maxvolume != requested_.maxvolume) {
-        control_mode_ = ControlMode_::Request;
-        response = Send(MakeCommand(denon_cmd::volume_maxprefix, requested_.maxvolume));
-        if (response == Report_::OK) {
-            commanded_.maxvolume = requested_.maxvolume;
-        }
+        Print(Verbosity::Warning, "Max volume implementation missing!");
+        response = Report_::BadInput;
     }
     PrintStates(Verbosity::Debug);
     return response;
@@ -674,8 +674,11 @@ auto AVRHandler::Send(std::string_view cmd, bool wait) -> Report_ {
 
 std::string AVRHandler::MakeCommand(std::string cmd, std::optional<int> num) const {
     if (num) {      //TODO: reevaluate if any usecase other than adding num occur
-        if (cmd.compare(denon_cmd::volume_prefix) == 0) {
+        if (cmd == denon_cmd::volume_prefix) {
             cmd += dbtostring(*num);
+        }
+        else if (cmd.starts_with(denon_cmd::chanvol_prefix)) {
+            cmd += dbtostring(*num, 500, 380, 620);
         }
         else {
             cmd += std::to_string(*num);
@@ -684,43 +687,41 @@ std::string AVRHandler::MakeCommand(std::string cmd, std::optional<int> num) con
     return cmd;
 }
 
-std::string AVRHandler::dbtostring(int db) const {
+std::string AVRHandler::dbtostring(int db_tenths, int zero, int min, int max) {
     std::string result;
-    db = static_cast<int>(std::round(db / 5.0)) * 5;
-    db += 800;
-    if (db <= 0) {
-        result = "00";
+    db_tenths = static_cast<int>(std::round(db_tenths / 5.0)) * 5;
+    db_tenths += zero;
+    if (db_tenths <= min) {
+        db_tenths = min;
     }
-    else if (db >= 980) {
-        result = "98";
+    else if (db_tenths >= max) {
+        db_tenths = max;
     }
-    else {
-        if (db < 100) {
-            result = "0";
-        }
-        result += std::to_string(db / 10);
-        if ((db % 10) > 0) {
-            result += '5';
-        }
+    if (db_tenths < 100) {
+        result = "0";
+    }
+    result += std::to_string(db_tenths / 10);
+    if ((db_tenths % 10) > 0) {
+        result += '5';
     }
     return result;
 }
 
-std::optional<int> AVRHandler::stringtodb(std::string_view str) const {
+std::optional<int> AVRHandler::stringtodb(std::string_view str, int zero) {
     std::string string{str};
     if (string.size() == 2) {
         string += '0';
     }
     try {
-        return std::stoi(string) - 800;
+        return std::stoi(string) - zero;
     }
     catch (const std::invalid_argument&) {
-        Print(Verbosity::Warning,  std::format("Invalid string characters for db conversion: [{}]\n",
-                                               string));
+        std::cerr << std::format("[WARNING] Invalid string characters for db conversion: [{}]\n",
+                                               string);
         return std::nullopt;
     }
     catch (const std::out_of_range&) {
-        Print(Verbosity::Warning, std::format("String too large for db conversion: [{}]\n", string));
+        std::cerr << std::format("[WARNING] String too large for db conversion: [{}]\n", string);
         return std::nullopt;
     }
 }
@@ -765,28 +766,98 @@ void AVRHandler::PrintStates(Verbosity level) {
     std::cout << std::format("surround mode : | {: >{}} | {: >{}} | {: >{}}\n",
                              requested_.surround.substr(0, w1), w1, commanded_.surround.substr(0, w1), 
                              w1, reported_.surround.substr(0, w1), w1);
-    std::cout << std::format("volume:         | {:+{}.1f} db | {:+{}.1f} db | {:+{}.1f} db\n", 
-                             requested_.volume / 10.0, w2, commanded_.volume / 10.0, w2, 
-                             reported_.volume / 10.0, w2);
-    std::cout << std::format("maxvolume:      | {:+{}.1f} db | {:+{}.1f} db | {:+{}.1f} db\n", 
-                             requested_.maxvolume / 10.0, w2, commanded_.maxvolume / 10.0, w2, 
-                             reported_.maxvolume / 10.0, w2);
-    std::cout << std::format("chanvol FL:     | {:+{}.1f} db | {:+{}.1f} db | {:+{}.1f} db\n", 
-                             requested_.chanvol.FL / 10.0, w2, commanded_.chanvol.FL / 10.0, w2, 
-                             reported_.chanvol.FL / 10.0, w2);
-    std::cout << std::format("chanvol FR:     | {:+{}.1f} db | {:+{}.1f} db | {:+{}.1f} db\n", 
-                             requested_.chanvol.FR / 10.0, w2, commanded_.chanvol.FR / 10.0, w2, 
-                             reported_.chanvol.FR / 10.0, w2);
-    std::cout << std::format("chanvol C:      | {:+{}.1f} db | {:+{}.1f} db | {:+{}.1f} db\n", 
-                             requested_.chanvol.C / 10.0, w2, commanded_.chanvol.C / 10.0, w2, 
-                             reported_.chanvol.C / 10.0, w2);
-    std::cout << std::format("chanvol SW:     | {:+{}.1f} db | {:+{}.1f} db | {:+{}.1f} db\n", 
-                             requested_.chanvol.SW / 10.0, w2, commanded_.chanvol.SW / 10.0, w2, 
-                             reported_.chanvol.SW / 10.0, w2); 
-    std::cout << std::format("chanvol SL:     | {:+{}.1f} db | {:+{}.1f} db | {:+{}.1f} db\n", 
-                             requested_.chanvol.SL / 10.0, w2, commanded_.chanvol.SL / 10.0, w2, 
-                             reported_.chanvol.SL / 10.0, w2);
-    std::cout << std::format("chanvol SR:     | {:+{}.1f} db | {:+{}.1f} db | {:+{}.1f} db\n", 
-                             requested_.chanvol.SR / 10.0, w2, commanded_.chanvol.SR / 10.0, w2, 
-                             reported_.chanvol.SR / 10.0, w2);
+    std::cout << std::format("volume:         | {} | {} | {}\n", printdb(requested_.volume, w2), 
+                             printdb(commanded_.volume, w2), printdb(reported_.volume, w2));
+    std::cout << std::format("maxvolume:      | {} | {} | {}\n", printdb(requested_.maxvolume, w2), 
+                             printdb(commanded_.maxvolume, w2), printdb(reported_.maxvolume, w2));
+    std::cout << std::format("chanvol FL:     | {} | {} | {}\n", printdb(requested_.chanvol.FL, w2), 
+                             printdb(commanded_.chanvol.FL, w2), printdb(reported_.chanvol.FL, w2));
+    std::cout << std::format("chanvol FR:     | {} | {} | {}\n", printdb(requested_.chanvol.FR, w2), 
+                             printdb(commanded_.chanvol.FR, w2), printdb(reported_.chanvol.FR, w2));
+    std::cout << std::format("chanvol C:      | {} | {} | {}\n", printdb(requested_.chanvol.C, w2), 
+                             printdb(commanded_.chanvol.C, w2), printdb(reported_.chanvol.C, w2));
+    std::cout << std::format("chanvol SW:     | {} | {} | {}\n", printdb(requested_.chanvol.SW, w2),
+                             printdb(commanded_.chanvol.SW, w2), printdb(reported_.chanvol.SW, w2)); 
+    std::cout << std::format("chanvol SL:     | {} | {} | {}\n", printdb(requested_.chanvol.SL, w2), 
+                             printdb(commanded_.chanvol.SL, w2), printdb(reported_.chanvol.SL, w2));
+    std::cout << std::format("chanvol SR:     | {} | {} | {}\n", printdb(requested_.chanvol.SR, w2), 
+                             printdb(commanded_.chanvol.SR, w2), printdb(reported_.chanvol.SR, w2));
+}
+
+std::string AVRHandler::printdb(int value, int width) {
+    if (width == 0) {
+        if (value == 0) {
+            return "0 db";
+        }
+        else {
+            return std::format("{:+.1f} db", value / 10.0);
+        }
+    }
+    else {
+        if (value == 0) {
+            return std::format("{:{}.1f} db", value / 10.0, width);
+        }
+        else {
+            return std::format("{:+{}.1f} db", value / 10.0, width);
+        }
+    }
+}
+
+bool test_dbtostring() {
+    std::pair<int, const char*> MVs[] = {
+        {-10000, "00"},
+        {  -801, "00"},
+        {  -800, "00"},
+        {  -799, "00"},
+        {  -798, "00"},
+        {  -797, "005"},
+        {  -796, "005"},
+        {  -795, "005"},
+        {  -794, "005"},
+        {  -793, "005"},
+        {  -792, "01"},
+        {  -300, "50"},
+        {     0, "80"},
+        {   179, "98"},
+        {   180, "98"},
+        {   181, "98"},
+        {  1000, "98"}
+    };
+    std::pair<int, const char*> CVs[] = {
+        {-10000, "38"},
+        {  -121, "38"},
+        {  -120, "38"},
+        {  -119, "38"},
+        {  -118, "38"},
+        {  -117, "385"},
+        {  -116, "385"},
+        {  -115, "385"},
+        {  -114, "385"},
+        {  -113, "385"},
+        {  -112, "39"},
+        {     0, "50"},
+        {   119, "62"},
+        {   120, "62"},
+        {   121, "62"},
+        {  1000, "62"}
+    };
+    std::string response;
+    for (int i = 0; i < sizeof(MVs)/sizeof(MVs[0]); i++) {
+        response = AVRHandler::dbtostring(MVs[i].first);
+        if (response != MVs[i].second) {
+            std::cerr << std::format("[WARNING] failed on MV case {}, input {}, output {}, expected"
+                                     " {}\n",i, MVs[i].first, response, MVs[i].second);
+            return false;
+        }
+    }
+    for (int i = 0; i < sizeof(CVs)/sizeof(CVs[0]); i++) {
+        response = AVRHandler::dbtostring(CVs[i].first, 500, 380, 620);
+        if (response != CVs[i].second) {
+            std::cerr << std::format("[WARNING] failed on CV case {}, input {}, output {}, expected"
+                                     " {}\n", i, CVs[i].first, response, CVs[i].second);
+            return false;
+        }
+    }
+    std::cout << "all tests of dbtostring passed\n";
+    return true;
 }
