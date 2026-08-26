@@ -4,7 +4,6 @@
 #include <stdexcept>
 #include <format>
 #include <chrono>
-#include <thread>
 #include <string>
 #include <cmath>
 #include <winsock2.h>
@@ -38,8 +37,8 @@ AVRHandler::~AVRHandler() {
     if (socket_ != INVALID_SOCKET) {
         int response = shutdown(socket_, SD_SEND);
         if (response == 0) {
-            TimePoint_ kill_deadline = Clock_::now() + MilliSeconds_(2000);
-            Report_ coms_response;
+            Timer kill_deadline{2000, true};
+            Report_ coms_response = Report_::Unknown;
             bool listening = true;
             connection_shutting_down_ = true;
             while (listening) {
@@ -52,7 +51,7 @@ AVRHandler::~AVRHandler() {
                     Print("Connection error, forcing shutdown"); 
                     listening = false;
                 }
-                if (Clock_::now() > kill_deadline) {
+                if (kill_deadline.IsExpired()) {
                     Print("Connection timed out, forcing shutdown");
                     listening = false;
                 }
@@ -80,30 +79,30 @@ int AVRHandler::ControlLoop() {
         return 2; //issue with syncing
     }
     
-    auto test_deadline = Clock_::now() + MilliSeconds_(50);
+    Timer test_deadline{50, true};
     int test_stage = 0;
     int test_db = -300;
     
     while (stayalive) {
 
         //test infrastructure below v v
-        if (Clock_::now() > test_deadline) {
+        if (test_deadline.IsExpired()) {
             switch (test_stage) {
                 case 0:
                     Print("\n-------waiting for straggler messages-------\n\n");
-                    test_deadline = Clock_::now() + MilliSeconds_(5000);
+                    test_deadline.Set(5000);
                     break;
                 case 1:
                     Print("\n------------volume up to -26db------------\n\n");
                     requested_.volume = -260;
                     control_mode_ = ControlMode_::Request;
-                    test_deadline = Clock_::now() + MilliSeconds_(2500);
+                    test_deadline.Set(2500);
                     break;
                 case 2:
                     Print("\n------------volume down to -31db------------\n\n");
                     requested_.volume = -310;
                     control_mode_ = ControlMode_::Request;
-                    test_deadline = Clock_::now() + MilliSeconds_(2500);
+                    test_deadline.Set(2500);
                     break;
                 case 3:
                     if (test_db > -400) {
@@ -112,30 +111,30 @@ int AVRHandler::ControlLoop() {
                         test_db -= 5;
                         requested_.volume = test_db;
                         control_mode_ = ControlMode_::Request;
-                        // inchain_.append(std::format("MV{}|",dbtostring(test_db)));
+                        // inchain_.append(std::format("MV{}|",DbToString(test_db)));
                     }
-                    test_deadline = Clock_::now() + MilliSeconds_(10);
+                    test_deadline.Set(10);
                     break;
                 case 4:
                     Print("\n--------purging any remaining incoming messages-----------\n");
-                    test_deadline = Clock_::now() + MilliSeconds_(5000);
+                    test_deadline.Set(5000);
                     break;
                 case 5:
                     Print("\n--------corruption test 1: set volume to -30 db-----\n\n");
                     requested_.volume = -300;
                     control_mode_ = ControlMode_::Request;
-                    test_deadline = Clock_::now() + MilliSeconds_(2500);
+                    test_deadline.Set(2500);
                     break;
                 case 6:
                     Print("\n--------corruption test 1: set volume to -31 db--------\n\n");
                     requested_.volume = -310;
                     control_mode_ = ControlMode_::Request;
-                    test_deadline = Clock_::now() + MilliSeconds_(150);
+                    test_deadline.Set(150);
                     break;
                 case 7:
-                    Print("\n--------corruption test 1: modify commanded_ after 150ms-----\n\n");
-                    commanded_.volume = -250;
-                    test_deadline = Clock_::now() + MilliSeconds_(5000);
+                    Print("\n--------corruption test 1: inject bad report after 150ms-----\n\n");
+                    inchain_.append("MV42|");
+                    test_deadline.Set(5000);
                     break;
                 // case 7:
                 //     Print("\n--------corruption test 3: set volume to -30db---------\n\n");
@@ -174,7 +173,7 @@ int AVRHandler::ControlLoop() {
         }
 
         //sending: making sure commanded_ is up-to-date through SyncOut
-        if ((commanded_ != requested_) && (Clock_::now() > command_cooldown_)) {
+        if ((commanded_ != requested_) && !command_cooldown_.IsPending()) {
             response = SyncOut();
             if (response != Report_::OK) {
                 return 4; //problem with Send
@@ -209,7 +208,7 @@ auto AVRHandler::ControlPing(bool silent, bool block, int time_out) -> Report_ {
     signal_ = denon_cmd::power_prefix;
     signal_received_ = false;
     Report_ response = Send(denon_cmd::power_status, block);
-    TimePoint_ deadline;
+    Timer deadline;
     if ((!block) || (response != Report_::OK)) {
         return response;
     }
@@ -217,13 +216,13 @@ auto AVRHandler::ControlPing(bool silent, bool block, int time_out) -> Report_ {
         if (time_out > 0) {
             Print(Verbosity::Debug, std::format("Waiting until we receive expected respone (up to " 
                                                 "{} ms)\n", time_out));
-            deadline = Clock_::now() + MilliSeconds_(time_out);
+            deadline.Set(time_out);
         }
         else {
             Print(Verbosity::Debug, "Waiting until we receive expected respone\n");
         }
         while (!signal_received_) {
-            if ((time_out > 0) && (Clock_::now() > deadline)) {
+            if (deadline.IsExpired()) {
                 Print(Verbosity::Warning, "Polling the AVR timed out\n");
                 return Report_::NoData; 
             }
@@ -240,11 +239,11 @@ auto AVRHandler::ControlPing(bool silent, bool block, int time_out) -> Report_ {
 auto AVRHandler::ControlResync() -> Report_ {
     Print("Syncing all parameters from the AVR\n");
     PrintStates(Verbosity::Debug);
-    TimePoint_ deadline;
+    Timer deadline;
     Report_ response = Report_::Unknown;
-    int attempt;
-    bool sent;
-    bool succeeded;
+    int attempt = 1;
+    bool sent = false;
+    bool succeeded = false;
     //TODO: might be smart to sleep for 'patience' ms (or more) to purge denon incoming messages 
     for (int stage = 0; stage < 5; stage++) {
         attempt = 1;
@@ -257,7 +256,7 @@ auto AVRHandler::ControlResync() -> Report_ {
                         Print(Verbosity::Debug, "Syncing power state\n");
                         response = Send(denon_cmd::power_status, true);
                         signal_ = denon_cmd::power_prefix; //read as 'last message we care about'
-                        break;                             //more may follow and are ignored
+                        break;                             //more may follow but will be ignored
                     case 1:
                         Print(Verbosity::Debug, "Syncing input/source\n");
                         response = Send(denon_cmd::input_status, true);
@@ -286,7 +285,7 @@ auto AVRHandler::ControlResync() -> Report_ {
                 if (response == Report_::OK) {
                     sent = true;
                     signal_received_ = false;
-                    deadline = Clock_::now() + MilliSeconds_(1000);
+                    deadline.Set(1000);
                 }
                 else {
                     return response;
@@ -302,7 +301,7 @@ auto AVRHandler::ControlResync() -> Report_ {
                     succeeded = true;
                     break;
                 }
-                else if (Clock_::now() > deadline) {
+                else if (deadline.IsExpired()) {
                     Print(Verbosity::Warning, std::format("Sync stage {} timed out\n", stage)); 
                     sent = false;
                     attempt++;
@@ -427,17 +426,17 @@ auto AVRHandler::SyncInDb(std::string_view message, std::string_view prefix,
     std::string_view params = message.substr(prefix.size());
     std::optional<int> num;
     if (prefix.starts_with(denon_cmd::chanvol_prefix)) {
-        num = stringtodb(params, 500);
+        num = StringToDb(params, 500);
     }
     else {
-        num = stringtodb(params);
+        num = StringToDb(params);
     }
     if (!num) {
         Print(Verbosity::Warning, std::format("Parsing incoming message [{}] failed.\n    params [{}]"
                                               " do not convert cleanly to an int\n", prefix, params));
         return Report_::BadInput;
     }
-    Print(Verbosity::Debug, std::format("Denon reports {} set to {}\n", report_string, printdb(*num)));
+    Print(Verbosity::Debug, std::format("Denon reports {} set to {}\n", report_string, PrintDb(*num)));
     if (*num != report_slot) {
         report_slot = *num;
         if (control_mode_ != ControlMode_::Request) {
@@ -470,7 +469,7 @@ auto AVRHandler::SyncOut() -> Report_ {
 
 auto AVRHandler::SyncResolve() -> Report_ {
     if (control_mode_ == ControlMode_::Request) {
-        if (Clock_::now() < response_deadline_) { 
+        if (response_deadline_.IsPending()) { 
             return Report_::Wait;
         }
         else {
@@ -484,7 +483,10 @@ auto AVRHandler::SyncResolve() -> Report_ {
                     commanded_ = requested_;
                 }
                 failed_syncs_ = 0;
+                command_cooldown_.Reset();
+                response_deadline_.Reset();
                 control_mode_ = ControlMode_::Rest;
+                PrintStates(Verbosity::Debug);
                 return Report_::OK;
             }
             else {
@@ -515,7 +517,8 @@ auto AVRHandler::SyncResolve() -> Report_ {
         }
         commanded_ = requested_ = reported_;
         failed_syncs_ = 0;
-        response_deadline_ = Clock_::now();
+        command_cooldown_.Reset();
+        response_deadline_.Reset();
         control_mode_ = ControlMode_::Rest;
         PrintStates(Verbosity::Debug);
         return Report_::OK;
@@ -647,10 +650,10 @@ auto AVRHandler::Parse() -> Report_ {
 }
 
 auto AVRHandler::Send(std::string_view cmd, bool wait) -> Report_ {
-    if (Clock_::now() < command_cooldown_) {
-        if (wait) { 
+    if (command_cooldown_.IsPending()) {
+        if (wait) {
             Print(Verbosity::Debug, "Send called within cooldown, waiting for it to end\n");
-            std::this_thread::sleep_until(command_cooldown_);
+            command_cooldown_.Wait();
         }
         else {
             Print(Verbosity::Warning, std::format("Tried to send command [{}] while in cooldown.\n",
@@ -662,8 +665,8 @@ auto AVRHandler::Send(std::string_view cmd, bool wait) -> Report_ {
     full += '\r';
     Print(Verbosity::Info, std::format("Sending following command to AVR: [{}]\n", cmd));
     int response = send(socket_, full.data(), static_cast<int>(full.size()), 0);
-    command_cooldown_ = Clock_::now() + cooldown_default_;
-    response_deadline_ = Clock_::now() + patience_default_;
+    command_cooldown_.Set();
+    response_deadline_.Set();
     if (response == SOCKET_ERROR) {
         Print(Verbosity::Warning, std::format("Failed to send command: [{}]\n", cmd));
         connection_healthy_ = false;
@@ -672,13 +675,13 @@ auto AVRHandler::Send(std::string_view cmd, bool wait) -> Report_ {
     return Report_::OK;
 }
 
-std::string AVRHandler::MakeCommand(std::string cmd, std::optional<int> num) const {
+std::string AVRHandler::MakeCommand(std::string cmd, std::optional<int> num) {
     if (num) {      //TODO: reevaluate if any usecase other than adding num occur
         if (cmd == denon_cmd::volume_prefix) {
-            cmd += dbtostring(*num);
+            cmd += DbToString(*num);
         }
         else if (cmd.starts_with(denon_cmd::chanvol_prefix)) {
-            cmd += dbtostring(*num, 500, 380, 620);
+            cmd += DbToString(*num, 500, 380, 620);
         }
         else {
             cmd += std::to_string(*num);
@@ -687,7 +690,7 @@ std::string AVRHandler::MakeCommand(std::string cmd, std::optional<int> num) con
     return cmd;
 }
 
-std::string AVRHandler::dbtostring(int db_tenths, int zero, int min, int max) {
+std::string AVRHandler::DbToString(int db_tenths, int zero, int min, int max) {
     std::string result;
     db_tenths = static_cast<int>(std::round(db_tenths / 5.0)) * 5;
     db_tenths += zero;
@@ -707,7 +710,7 @@ std::string AVRHandler::dbtostring(int db_tenths, int zero, int min, int max) {
     return result;
 }
 
-std::optional<int> AVRHandler::stringtodb(std::string_view str, int zero) {
+std::optional<int> AVRHandler::StringToDb(std::string_view str, int zero) {
     std::string string{str};
     if (string.size() == 2) {
         string += '0';
@@ -766,25 +769,25 @@ void AVRHandler::PrintStates(Verbosity level) {
     std::cout << std::format("surround mode : | {: >{}} | {: >{}} | {: >{}}\n",
                              requested_.surround.substr(0, w1), w1, commanded_.surround.substr(0, w1), 
                              w1, reported_.surround.substr(0, w1), w1);
-    std::cout << std::format("volume:         | {} | {} | {}\n", printdb(requested_.volume, w2), 
-                             printdb(commanded_.volume, w2), printdb(reported_.volume, w2));
-    std::cout << std::format("maxvolume:      | {} | {} | {}\n", printdb(requested_.maxvolume, w2), 
-                             printdb(commanded_.maxvolume, w2), printdb(reported_.maxvolume, w2));
-    std::cout << std::format("chanvol FL:     | {} | {} | {}\n", printdb(requested_.chanvol.FL, w2), 
-                             printdb(commanded_.chanvol.FL, w2), printdb(reported_.chanvol.FL, w2));
-    std::cout << std::format("chanvol FR:     | {} | {} | {}\n", printdb(requested_.chanvol.FR, w2), 
-                             printdb(commanded_.chanvol.FR, w2), printdb(reported_.chanvol.FR, w2));
-    std::cout << std::format("chanvol C:      | {} | {} | {}\n", printdb(requested_.chanvol.C, w2), 
-                             printdb(commanded_.chanvol.C, w2), printdb(reported_.chanvol.C, w2));
-    std::cout << std::format("chanvol SW:     | {} | {} | {}\n", printdb(requested_.chanvol.SW, w2),
-                             printdb(commanded_.chanvol.SW, w2), printdb(reported_.chanvol.SW, w2)); 
-    std::cout << std::format("chanvol SL:     | {} | {} | {}\n", printdb(requested_.chanvol.SL, w2), 
-                             printdb(commanded_.chanvol.SL, w2), printdb(reported_.chanvol.SL, w2));
-    std::cout << std::format("chanvol SR:     | {} | {} | {}\n", printdb(requested_.chanvol.SR, w2), 
-                             printdb(commanded_.chanvol.SR, w2), printdb(reported_.chanvol.SR, w2));
+    std::cout << std::format("volume:         | {} | {} | {}\n", PrintDb(requested_.volume, w2), 
+                             PrintDb(commanded_.volume, w2), PrintDb(reported_.volume, w2));
+    std::cout << std::format("maxvolume:      | {} | {} | {}\n", PrintDb(requested_.maxvolume, w2), 
+                             PrintDb(commanded_.maxvolume, w2), PrintDb(reported_.maxvolume, w2));
+    std::cout << std::format("chanvol FL:     | {} | {} | {}\n", PrintDb(requested_.chanvol.FL, w2), 
+                             PrintDb(commanded_.chanvol.FL, w2), PrintDb(reported_.chanvol.FL, w2));
+    std::cout << std::format("chanvol FR:     | {} | {} | {}\n", PrintDb(requested_.chanvol.FR, w2), 
+                             PrintDb(commanded_.chanvol.FR, w2), PrintDb(reported_.chanvol.FR, w2));
+    std::cout << std::format("chanvol C:      | {} | {} | {}\n", PrintDb(requested_.chanvol.C, w2), 
+                             PrintDb(commanded_.chanvol.C, w2), PrintDb(reported_.chanvol.C, w2));
+    std::cout << std::format("chanvol SW:     | {} | {} | {}\n", PrintDb(requested_.chanvol.SW, w2),
+                             PrintDb(commanded_.chanvol.SW, w2), PrintDb(reported_.chanvol.SW, w2)); 
+    std::cout << std::format("chanvol SL:     | {} | {} | {}\n", PrintDb(requested_.chanvol.SL, w2), 
+                             PrintDb(commanded_.chanvol.SL, w2), PrintDb(reported_.chanvol.SL, w2));
+    std::cout << std::format("chanvol SR:     | {} | {} | {}\n", PrintDb(requested_.chanvol.SR, w2), 
+                             PrintDb(commanded_.chanvol.SR, w2), PrintDb(reported_.chanvol.SR, w2));
 }
 
-std::string AVRHandler::printdb(int value, int width) {
+std::string AVRHandler::PrintDb(int value, int width) {
     if (width == 0) {
         if (value == 0) {
             return "0 db";
@@ -843,7 +846,7 @@ bool test_dbtostring() {
     };
     std::string response;
     for (int i = 0; i < sizeof(MVs)/sizeof(MVs[0]); i++) {
-        response = AVRHandler::dbtostring(MVs[i].first);
+        response = AVRHandler::DbToString(MVs[i].first);
         if (response != MVs[i].second) {
             std::cerr << std::format("[WARNING] failed on MV case {}, input {}, output {}, expected"
                                      " {}\n",i, MVs[i].first, response, MVs[i].second);
@@ -851,13 +854,13 @@ bool test_dbtostring() {
         }
     }
     for (int i = 0; i < sizeof(CVs)/sizeof(CVs[0]); i++) {
-        response = AVRHandler::dbtostring(CVs[i].first, 500, 380, 620);
+        response = AVRHandler::DbToString(CVs[i].first, 500, 380, 620);
         if (response != CVs[i].second) {
             std::cerr << std::format("[WARNING] failed on CV case {}, input {}, output {}, expected"
                                      " {}\n", i, CVs[i].first, response, CVs[i].second);
             return false;
         }
     }
-    std::cout << "all tests of dbtostring passed\n";
+    std::cout << "all tests of DbToString passed\n";
     return true;
 }

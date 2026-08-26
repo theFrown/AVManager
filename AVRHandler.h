@@ -4,6 +4,7 @@
 #include <array>
 #include <string>
 #include <chrono>
+#include <thread>
 #include <optional>
 #include <winsock2.h>
 
@@ -31,19 +32,40 @@ public:
     VerbosityOverride& operator=(VerbosityOverride&&) = delete;
 };
 
+class Timer {
+private:
+    using Clock_ = std::chrono::steady_clock;
+    int default_period_;
+    std::optional<Clock_::time_point> deadline_;
+
+public:
+    Timer(int ms = 0, bool set_now = false) : default_period_(ms) { 
+        if (set_now) Set(ms);
+    }
+
+    void Set(int ms) { deadline_ = Clock_::now() + std::chrono::milliseconds(ms); }
+    void Set() { Set(default_period_); }
+    void Reset() { deadline_.reset(); }
+    void SetDefault(int ms) { default_period_ = ms; }
+    void Wait() const { if (IsPending()) std::this_thread::sleep_until(*deadline_); }
+    bool IsSet() const { return deadline_.has_value(); }
+    bool IsExpired() const { return deadline_.has_value() && (Clock_::now() > *deadline_); }
+    bool IsPending() const { return IsSet() && !IsExpired(); }
+};
+
 struct DenonState {
     std::string power;
     std::string input;
     std::string surround;
-    int volume; //all volumes stored in 0.1db increments: 10dB stored as 100, 10.5db as 105
-    int maxvolume;
-    struct ChanVol {
-        int FL;
-        int FR;
-        int C;
-        int SW;
-        int SL;
-        int SR;
+    int volume = 0; //all volumes stored in 0.1db increments: 10dB stored as 100, 10.5db as 105
+    int maxvolume = 0;
+    struct ChanVol { //volumes stored as offsets relative to volume
+        int FL = 0;
+        int FR = 0;
+        int C =  0;
+        int SW = 0;
+        int SL = 0;
+        int SR = 0;
         bool operator==(const ChanVol&) const = default;
     } chanvol;
     bool operator==(const DenonState&) const = default;
@@ -59,34 +81,34 @@ public:
     AVRHandler& operator=(AVRHandler&&) = delete;
 
     bool stayalive = false;
-    int status;
+    int status = -1;
 
     int ControlLoop();
-    static std::string dbtostring(int db_tenths, int zero = 800, int min = 0, int max = 980);
-    static std::optional<int> stringtodb(std::string_view str, int zero = 800);
-    static std::string printdb(int value, int width = 0);
+
+    //helper functions, public only so they can be externally tested
+    static std::string MakeCommand(std::string cmd, std::optional<int> num = std::nullopt);
+    static std::string DbToString(int db_tenths, int zero = 800, int min = 0, int max = 980);
+    static std::optional<int> StringToDb(std::string_view str, int zero = 800);
+    static std::string PrintDb(int value, int width = 0);
 
 private:
     enum class Report_ { OK, Data, NoData, Wait, Unknown, BadInput, Disconnected, SocketError };
     enum class ControlMode_ { Request, Report, Rest };
-    using Clock_ = std::chrono::steady_clock;
-    using TimePoint_ = Clock_::time_point;
-    using MilliSeconds_ = std::chrono::milliseconds;
     
     constexpr static const char* ip_string_ = "192.168.1.200";
     constexpr static int port_ = 23;
     constexpr static size_t inbufferlen_ = 270; //2x denon message max size (135 chars)
-    const MilliSeconds_ cooldown_default_{50};
-    const MilliSeconds_ patience_default_{200};
+    Timer command_cooldown_{50};
+    Timer response_deadline_{200};
     
-    std::array<char, inbufferlen_ + 1> inbuffer_;
+    std::array<char, inbufferlen_ + 1> inbuffer_ = {};
     std::string inchain_;
     std::string inmessage_;
-    std::string_view signal_;
+    std::string signal_;
     bool signal_received_ = false;
     SOCKET socket_ = INVALID_SOCKET;
-    sockaddr_in sockaddr_;
-    Verbosity verbosity_;
+    sockaddr_in sockaddr_ = {};
+    Verbosity verbosity_;   //constructor initializer list
     ControlMode_ control_mode_ = ControlMode_::Report;
     DenonState requested_ = {};
     DenonState commanded_ = {};
@@ -94,12 +116,10 @@ private:
     int failed_syncs_ = 0;
     bool connection_healthy_ = false;
     bool connection_shutting_down_ = false;
-    TimePoint_ command_cooldown_;
-    TimePoint_ response_deadline_;
 
+    Report_ ControlPing(bool silent = true, bool block = true, int time_out = 1000);
     Report_ ControlResync();
     Report_ ControlReceive(int time_out = 0);
-    Report_ ControlPing(bool silent = true, bool block = true, int time_out = 1000);
     Report_ SyncIn();
     Report_ SyncInString(std::string_view message, std::string_view prefix, 
                       std::string_view report_string, std::string& report_slot);
@@ -113,7 +133,6 @@ private:
     Report_ Receive();
     Report_ Parse();
     Report_ Send(std::string_view cmd, bool wait = false);
-    std::string MakeCommand(std::string cmd, std::optional<int> num = std::nullopt) const;
     void Print(Verbosity level, std::string_view msg) const;
     void Print(std::string_view msg) const { Print(Verbosity::Info, msg); }
     void PrintStates(Verbosity level);
