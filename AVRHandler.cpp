@@ -8,6 +8,7 @@
 #include <cmath>
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <winuser.h>
 #include "AVRHandler.h"
 #include "DenonProtocol.h"
 
@@ -27,7 +28,6 @@ AVRHandler::AVRHandler(Verbosity verbosity)
         else {
             status = 0;
             stayalive = true;
-            connection_healthy_ = true;
         }
     }
 }
@@ -58,13 +58,19 @@ AVRHandler::~AVRHandler() {
             }
         }
         else {
-            Print(Verbosity::Warning, std::format("Socket shutdown failed with response:\n    {}\n"
+            if (response == SOCKET_ERROR) {
+                response = WSAGetLastError();
+            }
+            Print(Verbosity::Warning, std::format("Socket shutdown failed with error: {}\n"
                                                   "    proceding with hard shutdown\n", response));
             linger value{.l_onoff = 1, .l_linger = 0};
             const char* value_byteaddress = reinterpret_cast<const char*>(&value);
             setsockopt(socket_, SOL_SOCKET, SO_LINGER, value_byteaddress, sizeof(value));
         }
         closesocket(socket_);
+    }
+    if (socket_event_ != WSA_INVALID_EVENT) {
+        WSACloseEvent(socket_event_);
     }
     WSACleanup();
 }
@@ -74,14 +80,16 @@ int AVRHandler::ControlLoop() {
     if (response != Report_::OK) {
         return 1; //issue with comms
     }
+    Stopwatch test_sw{true};
     response = ControlResync();
+    test_sw.Print();
     if (response != Report_::OK) {
         return 2; //issue with syncing
     }
     
     Timer test_deadline{50, true};
     int test_stage = 0;
-    int test_db = -300;
+    // int test_db = -300;
     
     while (stayalive) {
 
@@ -91,8 +99,11 @@ int AVRHandler::ControlLoop() {
                 case 0:
                     Print("\n-------waiting for straggler messages-------\n\n");
                     test_deadline.Set(5000);
+                    test_sw.Reset();
+                    test_sw.Start();
                     break;
                 case 1:
+                    test_sw.Print();
                     Print("\n------------volume up to -26db------------\n\n");
                     requested_.volume = -260;
                     control_mode_ = ControlMode_::Request;
@@ -105,37 +116,101 @@ int AVRHandler::ControlLoop() {
                     test_deadline.Set(2500);
                     break;
                 case 3:
-                    if (test_db > -400) {
-                        Print("\n------------sending rapid commands (-30db to -40db)------------\n\n");
-                        test_stage--; //keeps us in case 4
-                        test_db -= 5;
-                        requested_.volume = test_db;
-                        control_mode_ = ControlMode_::Request;
-                        // inchain_.append(std::format("MV{}|",DbToString(test_db)));
-                    }
-                    test_deadline.Set(10);
+                    Print("\n------------busy-wait---------------\n\n");
+                    test_deadline.Set(5000);
+                    test_sw.Reset();
+                    test_sw.Start();
                     break;
                 case 4:
-                    Print("\n--------purging any remaining incoming messages-----------\n");
-                    test_deadline.Set(5000);
+                    test_sw.Print();
+                    Print("\n------------interrupted busy-wait-----------\n\n");
+                    test_deadline.Set(1250);
+                    test_sw.Reset();
+                    test_sw.Start();
                     break;
                 case 5:
-                    Print("\n--------corruption test 1: set volume to -30 db-----\n\n");
-                    requested_.volume = -300;
-                    control_mode_ = ControlMode_::Request;
-                    test_deadline.Set(2500);
+                    {
+                        VerbosityOverride vo{verbosity_, Verbosity::Trace};
+                        ControlSleep(2500);
+                    }
+                    test_deadline.Set(1250);
                     break;
                 case 6:
-                    Print("\n--------corruption test 1: set volume to -31 db--------\n\n");
-                    requested_.volume = -310;
-                    control_mode_ = ControlMode_::Request;
-                    test_deadline.Set(150);
+                    test_sw.Print();
+                    Print("\n------------clean resync-----------\n\n");
+                    test_deadline.Set(1250);
+                    test_sw.Reset();
+                    test_sw.Start();
+                    ControlResync();
+                    test_sw.Print();
                     break;
-                case 7:
-                    Print("\n--------corruption test 1: inject bad report after 150ms-----\n\n");
-                    inchain_.append("MV42|");
-                    test_deadline.Set(5000);
+                case 7: 
+                    Print("\n------------broken resync-----------\n\n");
+                    test_deadline.Set(1250);
+                    event_healthy_ = false;
+                    test_sw.Reset();
+                    test_sw.Start();
+                    ControlResync();
+                    test_sw.Print();
+                    event_healthy_ = true;
                     break;
+                case 8: {
+                    Print("\n------------injected window message-------\n\n");
+                    PostThreadMessage(GetCurrentThreadId(), WM_APP, 0, 0);
+                    {
+                        VerbosityOverride vo{verbosity_, Verbosity::Trace};
+                        ControlSleep(2500);
+                    }
+                    event_healthy_ = false;
+                    {
+                        VerbosityOverride vo{verbosity_, Verbosity::Trace};
+                        ControlSleep(2500);
+                    }
+                    MSG msg = {};
+                    PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE);
+                    {
+                        VerbosityOverride vo{verbosity_, Verbosity::Trace};
+                        ControlSleep(2500);
+                    }
+                    test_deadline.Set(1250);
+                    event_healthy_ = true;
+                    break;
+                }
+                case 9:
+                    Print("\n------------end of test-----------\n\n");
+                    break;
+                // case 3:
+                //     if (test_db > -400) {
+                //         Print("\n------------sending rapid commands (-30db to -40db)------------\n\n");
+                //         test_stage--; //keeps us in case 4
+                //         test_db -= 5;
+                //         requested_.volume = test_db;
+                //         control_mode_ = ControlMode_::Request;
+                //         // inchain_.append(std::format("MV{}|",DbToString(test_db)));
+                //     }
+                //     test_deadline.Set(10);
+                //     break;
+                // case 4:
+                //     Print("\n--------purging any remaining incoming messages-----------\n");
+                //     test_deadline.Set(5000);
+                //     break;
+                // case 5:
+                //     Print("\n--------corruption test 1: set volume to -30 db-----\n\n");
+                //     requested_.volume = -300;
+                //     control_mode_ = ControlMode_::Request;
+                //     test_deadline.Set(2500);
+                //     break;
+                // case 6:
+                //     Print("\n--------corruption test 1: set volume to -31 db--------\n\n");
+                //     requested_.volume = -310;
+                //     control_mode_ = ControlMode_::Request;
+                //     test_deadline.Set(150);
+                //     break;
+                // case 7:
+                //     Print("\n--------corruption test 1: inject bad report after 150ms-----\n\n");
+                //     inchain_.append("MV42|");
+                //     test_deadline.Set(5000);
+                //     break;
                 // case 7:
                 //     Print("\n--------corruption test 3: set volume to -30db---------\n\n");
                 //     requested_.volume = -300;
@@ -292,7 +367,7 @@ auto AVRHandler::ControlResync() -> Report_ {
                 }
             }
             else {
-                response = ControlReceive(10);
+                response = ControlReceive(500);
                 if ((response == Report_::SocketError) || (response == Report_::Disconnected)) {
                     return response;
                 }
@@ -318,13 +393,12 @@ auto AVRHandler::ControlResync() -> Report_ {
     return Report_::OK;
 }
 
-auto AVRHandler::ControlReceive(int time_out) -> Report_ {
-    Report_ response = CheckIncoming(time_out);
-    if (response == Report_::SocketError) return response;
-    if (response == Report_::Data) {
-        response = Receive();
-        if ((response == Report_::SocketError) || (response == Report_::Disconnected)) return response;
+auto AVRHandler::ControlReceive(int time_out_ms) -> Report_ {
+    if (time_out_ms > 0) {
+        ControlSleep(time_out_ms);
     }
+    Report_ response = Receive();
+    if ((response == Report_::SocketError) || (response == Report_::Disconnected)) return response;
     if (inchain_.empty()) return response; //draining inchain_ is more important than transparency
     while ((response = Parse()) != Report_::NoData) { //effectively: if there's something in inchain_ worth parsing
         if (!inmessage_.empty()) {
@@ -333,6 +407,39 @@ auto AVRHandler::ControlReceive(int time_out) -> Report_ {
         }
     }
     return Report_::OK;
+}
+
+auto AVRHandler::ControlSleep(int ms) -> Waker_ { //TODO: consider intentionally ignoring coms case
+    DWORD response = 0;
+    if (event_healthy_) {
+        response = MsgWaitForMultipleObjects(1, &socket_event_, FALSE, ms, QS_POSTMESSAGE);
+    }
+    else {
+        response = MsgWaitForMultipleObjects(0, nullptr, FALSE, ms, QS_POSTMESSAGE);
+        if (response == WAIT_OBJECT_0) {
+            response++; //remaps window message to the same switch case below
+        }
+    }
+    switch (response) {
+        case WAIT_OBJECT_0:
+            Print(Verbosity::Trace, "Woken by coms being ready\n");
+            return Waker_::ComsReady;
+        case (WAIT_OBJECT_0 + 1):
+            Print(Verbosity::Trace, "Woken by window message\n");
+            return Waker_::WindowMessageIn;
+        case WAIT_TIMEOUT:
+            Print(Verbosity::Trace, "Woken by time-out\n");
+            return Waker_::TimeOut;
+        case WAIT_FAILED: {
+            int error = GetLastError();
+            Print(Verbosity::Error, std::format("Sleep function failed with error {}\n", error));
+            return Waker_::Failed;
+        }
+        default:
+            Print(Verbosity::Error, std::format("Sleep function failed for unknown reason with"
+                                                "response: {}\n", response));
+            return Waker_::Unknown;
+    }
 }
 
 auto AVRHandler::SyncIn() -> Report_ {
@@ -531,21 +638,36 @@ auto AVRHandler::SetupSocket() -> Report_ {
     WSADATA wsadata;
     int response = WSAStartup(MAKEWORD(2,2), &wsadata);
     if (response != 0) {
-        Print(Verbosity::Error, std::format("WSAStartup failed with response:\n    {}\n", response));
+        Print(Verbosity::Error, std::format("WSAStartup failed with error:\n    {}\n", response));
         return Report_::SocketError;
     }
     socket_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (socket_ == INVALID_SOCKET) {
-        Print(Verbosity::Error, "Failed to create socket\n");
+        response = WSAGetLastError();
+        Print(Verbosity::Error, std::format("Failed to create socket with error: {}\n", response));
         return Report_::SocketError;
     }
     sockaddr_.sin_family = AF_INET;
     sockaddr_.sin_port   = htons(port_);
     response = inet_pton(AF_INET, ip_string_, &sockaddr_.sin_addr);
     if (response != 1) {
-        Print(Verbosity::Error, "Failed to convert IP address\n");
+        if (response == 0) {
+            Print(Verbosity::Error, "Failed to convert IP address, bad input\n");
+        }
+        else {
+            response = WSAGetLastError();
+            Print(Verbosity::Error, std::format("Failed to convert IP address with error: {}\n", 
+                                                response));
+        }
         return Report_::BadInput;
     }
+    socket_event_ = WSACreateEvent();
+    if (socket_event_ == WSA_INVALID_EVENT) {
+        response = WSAGetLastError();
+        Print(Verbosity::Error, std::format("Failed to create socket event with error: {}\n", 
+                                            response));
+        return Report_::SocketError;
+    }   
     return Report_::OK;
 }
 
@@ -553,48 +675,51 @@ auto AVRHandler::Connect() -> Report_ {
     Print(Verbosity::Info, "Opening connection\n");
     connection_healthy_ = false;
     int response = connect(socket_, reinterpret_cast<const sockaddr*>(&sockaddr_), sizeof(sockaddr_));
-    if (response != 0) { 
-        Print(Verbosity::Error, std::format("Failed to connect socket with response:\n    {}\n", 
+    if (response != 0) {
+        if (response == SOCKET_ERROR) {
+            response = WSAGetLastError();
+        }
+        Print(Verbosity::Error, std::format("Failed to connect socket with error: {}\n", 
                                             response));
         return Report_::SocketError;
     }
+    response = WSAEventSelect(socket_, socket_event_, FD_READ | FD_CLOSE);
+    if (response != 0) {
+        if (response == SOCKET_ERROR) {
+            response = WSAGetLastError();
+        }
+        Print(Verbosity::Error, std::format("Failed to bind socket to event with error: {}\n", 
+                                             response));
+        return Report_::SocketError;
+    }
     connection_healthy_ = true; //TODO, consider waiting until confirmed with handshake
+    event_healthy_ = true;
     return Report_::OK;
 }
 
-auto AVRHandler::CheckIncoming(int time_out) -> Report_ {
-    Print(Verbosity::Debug, "Checking for incoming messages\n");
-    timeval tv{0, time_out * 1000};
-    fd_set readfds;
-    FD_ZERO(&readfds);
-    FD_SET(socket_, &readfds);
-    int response = select(0, &readfds, nullptr, nullptr, &tv);
-    if (response == 0) {
-        Print(Verbosity::Trace, "No incoming messages\n");
-        return Report_::NoData;
-    }
-    else if (response == SOCKET_ERROR) {
-        Print(Verbosity::Warning, "Issue with checking for messages\n");
-        connection_healthy_ = false;
-        return Report_::SocketError;
-    }
-    else if (FD_ISSET(socket_, &readfds)) {
-        Print(Verbosity::Debug, "Incoming message from AVR\n");
-        return Report_::Data;
-    }
-    else {
-        Print(Verbosity::Warning, "Incoming message from a mystery socket\n");
-        return Report_::Unknown;
-    }
-}
-
 auto AVRHandler::Receive() -> Report_ {
-    Print(Verbosity::Trace, "Receiving incoming message\n");
-    int response = recv(socket_, inbuffer_.data(), static_cast<int>(inbuffer_.size()), 0);
-    if (response == SOCKET_ERROR) { 
-        Print(Verbosity::Warning, "Failed to retreive response from AVR\n");
-        connection_healthy_ = false;
-        return Report_::SocketError;        
+    Print(Verbosity::Debug, "Checking for incoming messages\n");
+    int response = 0;
+    if (event_healthy_) {
+        if (!WSAResetEvent(socket_event_)) {
+            response = WSAGetLastError();
+            Print(Verbosity::Error, std::format("Resetting socket event failed with error: {}\n", response));
+            event_healthy_ = false;
+        }
+    }
+    response = recv(socket_, inbuffer_.data(), static_cast<int>(inbuffer_.size()), 0);
+    if (response == SOCKET_ERROR) {
+        response = WSAGetLastError();
+        if (response == WSAEWOULDBLOCK) {
+            Print(Verbosity::Trace, "No messages available\n");
+            return Report_::NoData;
+        }
+        else {
+            Print(Verbosity::Warning, std::format("Failed to retreive response from AVR with error: {}\n",
+                                                response));
+            connection_healthy_ = false;
+            return Report_::SocketError;
+        }
     }
     else if (response == 0) { 
         if (connection_shutting_down_) {
@@ -668,7 +793,9 @@ auto AVRHandler::Send(std::string_view cmd, bool wait) -> Report_ {
     command_cooldown_.Set();
     response_deadline_.Set();
     if (response == SOCKET_ERROR) {
-        Print(Verbosity::Warning, std::format("Failed to send command: [{}]\n", cmd));
+        response = WSAGetLastError();
+        Print(Verbosity::Warning, std::format("Failed to send command: [{}], with error: {}\n", cmd,
+                                              response));
         connection_healthy_ = false;
         return Report_::SocketError;        
     }

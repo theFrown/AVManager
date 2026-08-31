@@ -53,6 +53,46 @@ public:
     bool IsPending() const { return IsSet() && !IsExpired(); }
 };
 
+class Stopwatch {
+private:
+    using Clock_ = std::chrono::steady_clock;
+    using MilliSeconds_ = std::chrono::milliseconds;
+    std::optional<Clock_::time_point> start_;
+    std::optional<Clock_::time_point> stop_;
+
+public:
+    Stopwatch(bool start = true) { if (start) Start(); }
+    
+    void Start() { 
+        if (start_.has_value() && stop_.has_value()) {
+            start_ = Clock_::now() - *stop_ + *start_;
+        }
+        else {
+            start_ = Clock_::now(); 
+        }
+        stop_.reset();
+    }
+    void Stop() { if (start_.has_value()) stop_ = Clock_::now(); }
+    void Reset() { 
+        start_.reset();
+        stop_.reset(); 
+    }
+    std::optional<int> Read() const { 
+        if (!start_.has_value()) return std::nullopt;
+        auto delta = stop_.has_value() ? (*stop_ - *start_) : (Clock_::now() - *start_);
+        return static_cast<int>(std::chrono::duration_cast<MilliSeconds_>(delta).count()); 
+    }
+    void Print() const {
+        auto value = Read();
+        if (value.has_value()) {
+            std::cout << "Time elapsed: " << *value << " ms\n";
+        }
+        else {
+            std::cout << "stopwatch wasn't running!\n";
+        }
+    }
+};
+
 struct DenonState {
     std::string power;
     std::string input;
@@ -93,6 +133,7 @@ public:
 
 private:
     enum class Report_ { OK, Data, NoData, Wait, Unknown, BadInput, Disconnected, SocketError };
+    enum class Waker_ { ComsReady, WindowMessageIn, TimeOut, Failed, Unknown};
     enum class ControlMode_ { Request, Report, Rest };
     
     constexpr static const char* ip_string_ = "192.168.1.200";
@@ -107,6 +148,7 @@ private:
     std::string signal_;
     bool signal_received_ = false;
     SOCKET socket_ = INVALID_SOCKET;
+    WSAEVENT socket_event_ = WSA_INVALID_EVENT;
     sockaddr_in sockaddr_ = {};
     Verbosity verbosity_;   //constructor initializer list
     ControlMode_ control_mode_ = ControlMode_::Report;
@@ -116,10 +158,12 @@ private:
     int failed_syncs_ = 0;
     bool connection_healthy_ = false;
     bool connection_shutting_down_ = false;
+    bool event_healthy_ = false;
 
     Report_ ControlPing(bool silent = true, bool block = true, int time_out = 1000);
     Report_ ControlResync();
-    Report_ ControlReceive(int time_out = 0);
+    Report_ ControlReceive(int time_out_ms = 0);
+    Waker_  ControlSleep(int ms);
     Report_ SyncIn();
     Report_ SyncInString(std::string_view message, std::string_view prefix, 
                       std::string_view report_string, std::string& report_slot);
@@ -129,10 +173,10 @@ private:
     Report_ SyncResolve();
     Report_ SetupSocket();
     Report_ Connect();
-    Report_ CheckIncoming(int time_out = 0);
     Report_ Receive();
     Report_ Parse();
     Report_ Send(std::string_view cmd, bool wait = false);
+    
     void Print(Verbosity level, std::string_view msg) const;
     void Print(std::string_view msg) const { Print(Verbosity::Info, msg); }
     void PrintStates(Verbosity level);
