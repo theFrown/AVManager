@@ -1,8 +1,6 @@
 #include <iostream>
-// #include <thread>
-// #include <atomic>
-// #include <winsock2.h>
 #include "AVRHandler.h"
+#include "keyboard.h"
 
 int main() {
 
@@ -10,21 +8,25 @@ int main() {
     std::cout << std::unitbuf;
     #endif
 
-    std::cout << "AVManager starting\n";
-    AVRHandler avr{Verbosity::Debug};
-    int response = avr.status;
-    if (response != 0) {
-        std::cout << "boo, error:\n" << response << "\n";
+    std::cout << "KeyboardHook starting\n";
+    KeyboardHook keyhook;
+    if (keyhook.status != 0) {
+        std::cout << "boo, error:\n" << keyhook.status << "\n";
         return 1;
     }
-    // std::cout << "\n==============TEST COMS==============\n\n";
-    // response = avr.testcoms();
+    int response = keyhook.Run();
+
+
+    // std::cout << "AVManager starting\n";
+    // AVRHandler avr{Verbosity::Debug};
+    // int response = avr.status;
     // if (response != 0) {
     //     std::cout << "boo, error:\n" << response << "\n";
     //     return 1;
     // }
-    std::cout << "\n==============TEST LOOP==============\n\n";
-    response = avr.ControlLoop();
+    // std::cout << "\n==============TEST LOOP==============\n\n";
+    // response = avr.ControlLoop();
+
     if (response == 0) {
         std::cout << "yay\n";
     }
