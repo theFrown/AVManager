@@ -10,12 +10,15 @@ int main() {
 
     std::cout << "KeyboardHook starting\n";
     KeyboardHook keyhook;
-    if (keyhook.status != 0) {
-        std::cout << "boo, error:\n" << keyhook.status << "\n";
-        return 1;
-    }
-    int response = keyhook.Run();
-
+    bool response = keyhook.Start();
+    std::cin.get();
+    std::cin.ignore(1000, '\n');
+    keyhook.Stop();
+    keyhook.Start();
+    keyhook.Start();
+    std::cin.get();
+    keyhook.Stop();
+    keyhook.Stop();
 
     // std::cout << "AVManager starting\n";
     // AVRHandler avr{Verbosity::Debug};
@@ -27,7 +30,7 @@ int main() {
     // std::cout << "\n==============TEST LOOP==============\n\n";
     // response = avr.ControlLoop();
 
-    if (response == 0) {
+    if (response == true) {
         std::cout << "yay\n";
     }
     else {
