@@ -13,45 +13,126 @@ KeyboardHook::~KeyboardHook() {
 LRESULT CALLBACK KeyboardHook::ProcessKeys(int nCode, WPARAM wParam, LPARAM lParam) {
     if (nCode >= 0) {
         const KBDLLHOOKSTRUCT& key_message = *reinterpret_cast<KBDLLHOOKSTRUCT*>(lParam);
-        bool injected = key_message.flags & LLKHF_INJECTED;
-        bool ping_signed = key_message.dwExtraInfo == ping_key_signature_;
-        std::cout << key_message.time << ": " << key_message.vkCode;
-        std::cout << ((injected) ? ", injected" : ", organic");
-        switch (wParam) {
-            case WM_KEYDOWN:
-                std::cout << ", normal, down\n";
-                break;
-            case WM_KEYUP:
-                std::cout << ", normal, up\n";
-                break;
-            case WM_SYSKEYDOWN:
-                std::cout << ", system, down\n";
-                break;
-            case WM_SYSKEYUP:
-                std::cout << ", system, up\n";
-                break;
-            default:
-                std::cerr << "\n[WARNING] KeyboardHook unknown wParam: " << wParam << '\n';
-                break;
+        bool keydown = (wParam == WM_KEYDOWN) || (wParam == WM_SYSKEYDOWN);
+        
+        switch (key_message.vkCode) {       // phase 1: handle any modifier
+            case VK_LCONTROL: case VK_RCONTROL: case VK_CONTROL:
+                ctrl_down_.store(keydown);
+                return CallNextHookEx(0, nCode, wParam, lParam);
+            case VK_LMENU: case VK_RMENU: case VK_MENU:
+                alt_down_.store(keydown);
+                return CallNextHookEx(0, nCode, wParam, lParam);
+            case VK_LSHIFT: case VK_RSHIFT: case VK_SHIFT:
+                shift_down_.store(keydown);
+                return CallNextHookEx(0, nCode, wParam, lParam);
         }
-        switch (key_message.vkCode) {
-            case VK_END:
-                PostQuitMessage(0);
-                break;
-            case VK_VOLUME_DOWN:
-                if (injected && (wParam == WM_KEYUP) && ping_signed) {
-                    PingReply();
+
+        bool altdown = (wParam == WM_SYSKEYDOWN) || (wParam == WM_SYSKEYUP);
+        bool ctrldown = ctrl_down_.load();
+        if (ctrldown) altdown = alt_down_.load();
+        else alt_down_.store(altdown);
+        bool shiftdown = shift_down_.load();
+        bool ping_signed = key_message.dwExtraInfo == ping_key_signature_;
+
+        // v v debug only, remove me
+        // bool injected = key_message.flags & LLKHF_INJECTED; //might remove now we have dwExtraInfo
+        // std::cout << key_message.time << ": " << key_message.vkCode;
+        // std::cout << ((injected) ? ", injected" : ", organic");
+        // switch (wParam) { //this whole switch case can go once we stop using cout
+        //     case WM_KEYDOWN:
+        //         std::cout << ", normal, down\n";
+        //         break;
+        //     case WM_KEYUP:
+        //         std::cout << ", normal, up\n";
+        //         break;
+        //     case WM_SYSKEYDOWN:
+        //         std::cout << ", system, down\n";
+        //         break;
+        //     case WM_SYSKEYUP:
+        //         std::cout << ", system, up\n";
+        //         break;
+        //     default:
+        //         std::cerr << "\n[WARNING] KeyboardHook unknown wParam: " << wParam << '\n';
+        //         break;
+        // }
+        // ^ ^ debug only, remove me
+
+        switch (key_message.vkCode) {      //phase 2: handle any other key
+            case VK_END:  //TODO: consider removing/remapping once everything is stable
+                if (keydown && altdown && ctrldown && !shiftdown) {
+                    PostQuitMessage(0);
                 }
-                return 1;
-            case VK_VOLUME_MUTE:
-                if (wParam == WM_KEYUP) {
+                if (keydown && ctrldown && shiftdown && !altdown) {
                     PingSend();
                 }
-                return 1;
+                break;
+            case VK_VOLUME_UP:
+                if (ProcessCombo(raw_keys.vup, keydown, ctrldown, altdown, shiftdown)) {
+                    return swallow_key_value_;
+                }
+                break;
+            case VK_VOLUME_DOWN:
+                if (ProcessCombo(raw_keys.vdown, keydown, ctrldown, altdown, shiftdown)) {
+                    return swallow_key_value_;
+                }
+                break;
+            case VK_VOLUME_MUTE:
+                if (!keydown && ping_signed) {
+                    PingRelay();
+                    return swallow_key_value_;
+                }
+                else if (!shiftdown) {
+                    if (keydown) {
+                        raw_keys.mute.counter++;
+                        raw_keys.mute.isdown.store(true);
+                    }
+                    else {
+                        raw_keys.mute.isdown.store(false);
+                    }
+                    return swallow_key_value_;
+                }
+                break;
         }
     }
     return CallNextHookEx(0, nCode, wParam, lParam);
 }
+
+bool KeyboardHook::ProcessCombo(KeyStates::Combos& keycombo, bool keydown, bool ctrldown,
+                                bool altdown, bool shiftdown) {
+    if (ctrldown && !shiftdown && !altdown) {
+        if (keydown) {
+            keycombo.ctrl.counter++;
+            keycombo.ctrl.isdown.store(true);
+        }
+        else {
+            keycombo.ctrl.isdown.store(false);
+        }
+        return true;
+    }
+    if (altdown && !ctrldown && !shiftdown) {
+        if (keydown) {
+            keycombo.alt.counter++;
+            keycombo.alt.isdown.store(true);
+        }
+        else {
+            keycombo.alt.isdown.store(false);
+        }
+        return true;
+    }
+    if (shiftdown && !ctrldown && !altdown) {
+        return false;
+    }
+    // v v any time zero or multiple modifiers are down
+    if (keydown) {
+        keycombo.bare.counter++;
+        keycombo.bare.isdown.store(true);
+    }
+    else {
+        keycombo.bare.isdown.store(false);
+    }
+    return true;
+}
+
 
 bool KeyboardHook::Start() {
     if (worker_status_.load() != WorkerStatus::PreStart) {
@@ -97,7 +178,7 @@ bool KeyboardHook::Stop(bool force) {
 bool KeyboardHook::PingSend() {
     INPUT input = {};
     input.type = INPUT_KEYBOARD;
-    input.ki.wVk = VK_VOLUME_DOWN;
+    input.ki.wVk = VK_VOLUME_MUTE;
     input.ki.dwFlags = KEYEVENTF_KEYUP;
     input.ki.dwExtraInfo = ping_key_signature_;
     UINT response = SendInput(1, &input, sizeof(INPUT));
@@ -111,7 +192,7 @@ bool KeyboardHook::PingSend() {
     }
 }
 
-bool KeyboardHook::PingReply() {
+bool KeyboardHook::PingRelay() {
     bool response = PostThreadMessage(GetCurrentThreadId(), WM_APP + ping_message_number_, 0, 0);
     if (response) {
         return true;
@@ -151,7 +232,7 @@ void KeyboardHook::Run() {
             break;
         }
         else if (message.message == WM_APP + ping_message_number_) {
-            std::cout << "KeyboardHook received injected ping key\n";
+            std::cout << "KeyboardHook received injected ping key\n"; //TODO: replace report mechanism
         }
     }
     Unhook(hook_handle);
@@ -196,4 +277,20 @@ bool KeyboardHook::Unhook(HHOOK handle) {
     }
     hook_status_.store(HookStatus::Uninitialized);
     return true;
+}
+
+void KeyboardHook::PrintStates() const {
+    const KeyStates& keystates = raw_keys;
+    std::cout << "     |    vup    |   vdown   |   mute    |\n";
+    std::cout << "     | dwn - cnt | dwn - cnt | dwn - cnt |\n";
+    std::cout << std::format("bare |  {:d}  - {: >3} |  {:d}  - {: >3} |  {:d}  - {: >3} |\n", 
+                             keystates.vup.bare.isdown.load(), keystates.vup.bare.counter.load(),
+                             keystates.vdown.bare.isdown.load(), keystates.vdown.bare.counter.load(),
+                             keystates.mute.isdown.load(), keystates.mute.counter.load());
+    std::cout << std::format("ctrl |  {:d}  - {: >3} |  {:d}  - {: >3} |     -     |\n", 
+                             keystates.vup.ctrl.isdown.load(), keystates.vup.ctrl.counter.load(),
+                             keystates.vdown.ctrl.isdown.load(), keystates.vdown.ctrl.counter.load());
+    std::cout << std::format("alt  |  {:d}  - {: >3} |  {:d}  - {: >3} |     -     |\n", 
+                             keystates.vup.alt.isdown.load(), keystates.vup.alt.counter.load(),
+                             keystates.vdown.alt.isdown.load(), keystates.vdown.alt.counter.load());
 }

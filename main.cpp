@@ -8,9 +8,17 @@ int main() {
     std::cout << std::unitbuf;
     #endif
 
+    Timer sleeper{50};
     std::cout << "KeyboardHook starting\n";
     KeyboardHook keyhook;
+    keyhook.PrintStates();
     bool response = keyhook.Start();
+    for (int i = 0; i < 1000; i++) {
+        sleeper.Set();
+        sleeper.Wait();
+        keyhook.PrintStates();
+        if (keyhook.GetWorkerStatus() != KeyboardHook::WorkerStatus::Running) break;
+    }
     std::cin.get();
     std::cin.ignore(1000, '\n');
     keyhook.Stop();
