@@ -42,7 +42,7 @@ AVRHandler::~AVRHandler() {
             bool listening = true;
             connection_shutting_down_ = true;
             while (listening) {
-                coms_response = ControlReceive(10);
+                coms_response = ControlReceive(*kill_deadline.GetRemaining());
                 if (coms_response == Report_::Disconnected) {
                     Print("Connection shutdown confirmed");
                     listening = false;
@@ -274,7 +274,6 @@ auto AVRHandler::ControlPing(bool silent, bool block, int time_out) -> Report_ {
         Print(Verbosity::Warning, "non-blocking ControlPing still needs to be implemented!\n");
         block = true; //TODO: implement and remove this guard!
     }
-
     std::optional<VerbosityOverride> silence;
     if (silent) {
         silence.emplace(verbosity_, Verbosity::Warning);
@@ -289,7 +288,7 @@ auto AVRHandler::ControlPing(bool silent, bool block, int time_out) -> Report_ {
     }
     else {
         if (time_out > 0) {
-            Print(Verbosity::Debug, std::format("Waiting until we receive expected respone (up to " 
+            Print(Verbosity::Debug, std::format("Waiting until we receive expected response (up to " 
                                                 "{} ms)\n", time_out));
             deadline.Set(time_out);
         }
@@ -301,7 +300,8 @@ auto AVRHandler::ControlPing(bool silent, bool block, int time_out) -> Report_ {
                 Print(Verbosity::Warning, "Polling the AVR timed out\n");
                 return Report_::NoData; 
             }
-            response = ControlReceive(10);
+            int wait = deadline.GetRemaining().value_or(500);
+            response = ControlReceive(wait);
             if ((response == Report_::SocketError) || (response == Report_::Disconnected)) {
                 return response;
             }
@@ -320,7 +320,7 @@ auto AVRHandler::ControlResync() -> Report_ {
     bool sent = false;
     bool succeeded = false;
     //TODO: might be smart to sleep for 'patience' ms (or more) to purge denon incoming messages 
-    for (int stage = 0; stage < 5; stage++) {
+    for (int stage = 0; stage < 6; stage++) {
         attempt = 1;
         sent = false;
         succeeded = false;
@@ -343,11 +343,16 @@ auto AVRHandler::ControlResync() -> Report_ {
                         signal_ = denon_cmd::surround_prefix;
                         break;
                     case 3:
+                        Print(Verbosity::Debug, "Syncing mute state\n");
+                        response = Send(denon_cmd::mute_status, true);
+                        signal_ = denon_cmd::mute_prefix;
+                        break;
+                    case 4:
                         Print(Verbosity::Debug, "Syncing master volume\n");
                         response = Send(denon_cmd::volume_status, true);
                         signal_ = denon_cmd::volume_maxprefix;
                         break;
-                    case 4:
+                    case 5:
                         Print(Verbosity::Debug, "Syncing channel volumes\n");
                         response = Send(denon_cmd::chanvol_status, true);
                         signal_ = denon_cmd::chanvol_endreport;
@@ -420,6 +425,8 @@ auto AVRHandler::ControlSleep(int ms) -> Waker_ { //TODO: consider intentionally
             response++; //remaps window message to the same switch case below
         }
     }
+    MSG msg = {};
+    while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE) != 0); //TODO: parse thread messages
     switch (response) {
         case WAIT_OBJECT_0:
             Print(Verbosity::Trace, "Woken by coms being ready\n");
@@ -461,10 +468,12 @@ auto AVRHandler::SyncIn() -> Report_ {
     else if (message.starts_with(denon_cmd::surround_prefix)) {
         return SyncInString(message, denon_cmd::surround_prefix, "surround mode", reported_.surround);
     }
+    else if (message.starts_with(denon_cmd::mute_prefix)) {
+        return SyncInString(message, denon_cmd::mute_prefix, "mute state", reported_.mute);
+    }
     else if (message.starts_with(denon_cmd::volume_prefix)) {
         if (message.starts_with(denon_cmd::volume_maxprefix)) {
-            return SyncInDb(message, denon_cmd::volume_maxprefix, "max volume", 
-                                 reported_.maxvolume);
+            return SyncInDb(message, denon_cmd::volume_maxprefix, "max volume", reported_.maxvolume);
         }
         else {
             return SyncInDb(message, denon_cmd::volume_prefix, "volume", reported_.volume);
@@ -559,7 +568,14 @@ auto AVRHandler::SyncInDb(std::string_view message, std::string_view prefix,
 
 auto AVRHandler::SyncOut() -> Report_ {
     Report_ response = Report_::Unknown;
-    if (commanded_.volume != requested_.volume) {
+    if (commanded_.mute != requested_.mute) {
+        control_mode_ = ControlMode_::Request;
+        response = Send(denon_cmd::mute_prefix + requested_.mute);
+        if (response == Report_::OK) {
+            commanded_.mute = requested_.mute;
+        }
+    }
+    else if (commanded_.volume != requested_.volume) {
         control_mode_ = ControlMode_::Request;
         response = Send(MakeCommand(denon_cmd::volume_prefix, requested_.volume));
         if (response == Report_::OK) {
@@ -885,32 +901,35 @@ void AVRHandler::PrintStates(Verbosity level) {
     if (verbosity_ < level) return;
     int w1 = 13;
     int w2 = w1 - 3;
-    std::cout <<             "States:         |   Requested   |   Commanded   |   Reported   \n";
-    std::cout <<             "===============================================================\n";
-    std::cout << std::format("power state   : | {: >{}} | {: >{}} | {: >{}}\n",
+    std::cout <<             "States:        |   Requested   |   Commanded   |   Reported   \n";
+    std::cout <<             "==============================================================\n";
+    std::cout << std::format("power state:   | {: >{}} | {: >{}} | {: >{}}\n",
                              requested_.power.substr(0, w1), w1, commanded_.power.substr(0, w1), w1,
                              reported_.power.substr(0, w1), w1);
-    std::cout << std::format("input/source  : | {: >{}} | {: >{}} | {: >{}}\n",
+    std::cout << std::format("input/source:  | {: >{}} | {: >{}} | {: >{}}\n",
                              requested_.input.substr(0, w1), w1, commanded_.input.substr(0, w1), w1,
                              reported_.input.substr(0, w1), w1);
-    std::cout << std::format("surround mode : | {: >{}} | {: >{}} | {: >{}}\n",
+    std::cout << std::format("surround mode: | {: >{}} | {: >{}} | {: >{}}\n",
                              requested_.surround.substr(0, w1), w1, commanded_.surround.substr(0, w1), 
                              w1, reported_.surround.substr(0, w1), w1);
-    std::cout << std::format("volume:         | {} | {} | {}\n", PrintDb(requested_.volume, w2), 
+    std::cout << std::format("mute:          | {: >{}} | {: >{}} | {: >{}}\n", 
+                             requested_.mute.substr(0, w1), w1, commanded_.mute.substr(0, w1), w1,
+                             reported_.mute.substr(0, w1), w1);
+    std::cout << std::format("volume:        | {} | {} | {}\n", PrintDb(requested_.volume, w2), 
                              PrintDb(commanded_.volume, w2), PrintDb(reported_.volume, w2));
-    std::cout << std::format("maxvolume:      | {} | {} | {}\n", PrintDb(requested_.maxvolume, w2), 
+    std::cout << std::format("maxvolume:     | {} | {} | {}\n", PrintDb(requested_.maxvolume, w2), 
                              PrintDb(commanded_.maxvolume, w2), PrintDb(reported_.maxvolume, w2));
-    std::cout << std::format("chanvol FL:     | {} | {} | {}\n", PrintDb(requested_.chanvol.FL, w2), 
+    std::cout << std::format("chanvol FL:    | {} | {} | {}\n", PrintDb(requested_.chanvol.FL, w2), 
                              PrintDb(commanded_.chanvol.FL, w2), PrintDb(reported_.chanvol.FL, w2));
-    std::cout << std::format("chanvol FR:     | {} | {} | {}\n", PrintDb(requested_.chanvol.FR, w2), 
+    std::cout << std::format("chanvol FR:    | {} | {} | {}\n", PrintDb(requested_.chanvol.FR, w2), 
                              PrintDb(commanded_.chanvol.FR, w2), PrintDb(reported_.chanvol.FR, w2));
-    std::cout << std::format("chanvol C:      | {} | {} | {}\n", PrintDb(requested_.chanvol.C, w2), 
+    std::cout << std::format("chanvol C:     | {} | {} | {}\n", PrintDb(requested_.chanvol.C, w2), 
                              PrintDb(commanded_.chanvol.C, w2), PrintDb(reported_.chanvol.C, w2));
-    std::cout << std::format("chanvol SW:     | {} | {} | {}\n", PrintDb(requested_.chanvol.SW, w2),
+    std::cout << std::format("chanvol SW:    | {} | {} | {}\n", PrintDb(requested_.chanvol.SW, w2),
                              PrintDb(commanded_.chanvol.SW, w2), PrintDb(reported_.chanvol.SW, w2)); 
-    std::cout << std::format("chanvol SL:     | {} | {} | {}\n", PrintDb(requested_.chanvol.SL, w2), 
+    std::cout << std::format("chanvol SL:    | {} | {} | {}\n", PrintDb(requested_.chanvol.SL, w2), 
                              PrintDb(commanded_.chanvol.SL, w2), PrintDb(reported_.chanvol.SL, w2));
-    std::cout << std::format("chanvol SR:     | {} | {} | {}\n", PrintDb(requested_.chanvol.SR, w2), 
+    std::cout << std::format("chanvol SR:    | {} | {} | {}\n", PrintDb(requested_.chanvol.SR, w2), 
                              PrintDb(commanded_.chanvol.SR, w2), PrintDb(reported_.chanvol.SR, w2));
 }
 

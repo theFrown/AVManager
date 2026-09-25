@@ -11,6 +11,11 @@ namespace denon_cmd {
     constexpr const char* volume_up        = "MVUP";
     constexpr const char* volume_down      = "MVDOWN";
     constexpr const char* volume_maxprefix = "MVMAX ";
+
+    constexpr const char* mute_prefix = "MU";
+    constexpr const char* mute_status = "MU?";
+    constexpr const char* mute_on     = "MUON";
+    constexpr const char* mute_off    = "MUOFF";
     
     constexpr const char* chanvol_prefix    = "CV";
     constexpr const char* chanvol_status    = "CV?";

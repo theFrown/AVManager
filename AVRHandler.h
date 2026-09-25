@@ -23,7 +23,10 @@ public:
         }
         original_slot_ = temp_level; 
     }
-    ~VerbosityOverride() { 
+    ~VerbosityOverride() {
+        if (original_slot_ >= Verbosity::Info) {
+            std::cout << "Restoring verbosity level\n"; 
+        }
         original_slot_ = original_value_; 
     }
     VerbosityOverride(const VerbosityOverride&) = delete;
@@ -35,6 +38,7 @@ public:
 class Timer {
 private:
     using Clock_ = std::chrono::steady_clock;
+    using MilliSeconds_ = std::chrono::milliseconds;
     int default_period_;
     std::optional<Clock_::time_point> deadline_;
 
@@ -43,7 +47,7 @@ public:
         if (set_now) Set(ms);
     }
 
-    void Set(int ms) { deadline_ = Clock_::now() + std::chrono::milliseconds(ms); }
+    void Set(int ms) { deadline_ = Clock_::now() + MilliSeconds_(ms); }
     void Set() { Set(default_period_); }
     void Reset() { deadline_.reset(); }
     void SetDefault(int ms) { default_period_ = ms; }
@@ -51,6 +55,13 @@ public:
     bool IsSet() const { return deadline_.has_value(); }
     bool IsExpired() const { return deadline_.has_value() && (Clock_::now() > *deadline_); }
     bool IsPending() const { return IsSet() && !IsExpired(); }
+    std::optional<int> GetRemaining() const {
+        if (!IsSet()) return std::nullopt;
+        auto remaining = *deadline_ - Clock_::now();
+        int remaining_ms = static_cast<int>(std::chrono::ceil<MilliSeconds_>(remaining).count());
+        if (remaining_ms > 0) return remaining_ms;
+        else return 0;
+    }
 };
 
 class Stopwatch {
@@ -97,6 +108,7 @@ struct DenonState {
     std::string power;
     std::string input;
     std::string surround;
+    std::string mute;
     int volume = 0; //all volumes stored in 0.1db increments: 10dB stored as 100, 10.5db as 105
     int maxvolume = 0;
     struct ChanVol { //volumes stored as offsets relative to volume
@@ -152,9 +164,9 @@ private:
     sockaddr_in sockaddr_ = {};
     Verbosity verbosity_;   //constructor initializer list
     ControlMode_ control_mode_ = ControlMode_::Report;
-    DenonState requested_ = {};
-    DenonState commanded_ = {};
-    DenonState reported_ = {};
+    DenonState requested_;
+    DenonState commanded_;
+    DenonState reported_;
     int failed_syncs_ = 0;
     bool connection_healthy_ = false;
     bool connection_shutting_down_ = false;
