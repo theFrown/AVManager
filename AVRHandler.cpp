@@ -1,16 +1,17 @@
 #include <iostream>
-#include <array>
 #include <optional>
 #include <stdexcept>
 #include <format>
-#include <chrono>
 #include <string>
 #include <cmath>
+#include <utility>
+#include <algorithm>
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#include <winuser.h>
+#include <windows.h>    //lean + nomin in CMakeLists
 #include "AVRHandler.h"
 #include "DenonProtocol.h"
+#include "timing.h"
 
 AVRHandler::AVRHandler(Verbosity verbosity) 
     : verbosity_(verbosity)
@@ -179,60 +180,6 @@ int AVRHandler::ControlLoop() {
                 case 9:
                     Print("\n------------end of test-----------\n\n");
                     break;
-                // case 3:
-                //     if (test_db > -400) {
-                //         Print("\n------------sending rapid commands (-30db to -40db)------------\n\n");
-                //         test_stage--; //keeps us in case 4
-                //         test_db -= 5;
-                //         requested_.volume = test_db;
-                //         control_mode_ = ControlMode_::Request;
-                //         // inchain_.append(std::format("MV{}|",DbToString(test_db)));
-                //     }
-                //     test_deadline.Set(10);
-                //     break;
-                // case 4:
-                //     Print("\n--------purging any remaining incoming messages-----------\n");
-                //     test_deadline.Set(5000);
-                //     break;
-                // case 5:
-                //     Print("\n--------corruption test 1: set volume to -30 db-----\n\n");
-                //     requested_.volume = -300;
-                //     control_mode_ = ControlMode_::Request;
-                //     test_deadline.Set(2500);
-                //     break;
-                // case 6:
-                //     Print("\n--------corruption test 1: set volume to -31 db--------\n\n");
-                //     requested_.volume = -310;
-                //     control_mode_ = ControlMode_::Request;
-                //     test_deadline.Set(150);
-                //     break;
-                // case 7:
-                //     Print("\n--------corruption test 1: inject bad report after 150ms-----\n\n");
-                //     inchain_.append("MV42|");
-                //     test_deadline.Set(5000);
-                //     break;
-                // case 7:
-                //     Print("\n--------corruption test 3: set volume to -30db---------\n\n");
-                //     requested_.volume = -300;
-                //     control_mode_ = ControlMode_::Request;
-                //     test_deadline = Clock_::now() + MilliSeconds_(150);
-                //     break;
-                // case 8:
-                //     Print("\n--------corruption test 3: injecting denon report after 150ms--------\n\n");
-                //     inchain_.append("MV42|");
-                //     test_deadline = Clock_::now() + MilliSeconds_(5000);
-                //     break;
-                // case 9:
-                //     Print("\n--------corruption test 4: set volume to -31db--------\n\n");
-                //     requested_.volume = -310;
-                //     control_mode_ = ControlMode_::Request;
-                //     test_deadline = Clock_::now() + MilliSeconds_(10);
-                //     break;
-                // case 10:
-                //     Print("\n---------corruption test 4: injecting denon report after 10ms---------\n\n");
-                //     inchain_.append("MV41|");
-                //     test_deadline = Clock_::now() + MilliSeconds_(5000);
-                //     break;
                 default:
                     stayalive = false;
                     break;

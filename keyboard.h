@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <thread>
+#include <iostream>
 #include <windows.h> //lean + nomin in CMakeLists
 
 struct KeyStates {
@@ -39,7 +40,7 @@ public:
     static LRESULT CALLBACK ProcessKeys(int nCode, WPARAM wParam, LPARAM lParam);
     static bool PingKey();
     bool PingMsg();
-    void PrintStates() const; 
+    void PrintStates() const;
     WorkerStatus GetWorkerStatus() const { return worker_status_.load(); }
     HookStatus GetHookStatus() const { return hook_status_.load(); }
     PingStatus GetPingKeyStatus() const { return ping_key_status_.load(); }

@@ -3,10 +3,9 @@
 #include <iostream>
 #include <array>
 #include <string>
-#include <chrono>
-#include <thread>
 #include <optional>
 #include <winsock2.h>
+#include "timing.h"
 
 enum class Verbosity { Silent, Error, Warning, Info, Debug, Trace};
 
@@ -33,75 +32,6 @@ public:
     VerbosityOverride(VerbosityOverride&&) = delete;
     VerbosityOverride& operator=(const VerbosityOverride&) = delete;
     VerbosityOverride& operator=(VerbosityOverride&&) = delete;
-};
-
-class Timer {
-private:
-    using Clock_ = std::chrono::steady_clock;
-    using MilliSeconds_ = std::chrono::milliseconds;
-    int default_period_;
-    std::optional<Clock_::time_point> deadline_;
-
-public:
-    Timer(int ms = 0, bool set_now = false) : default_period_(ms) { 
-        if (set_now) Set(ms);
-    }
-
-    void Set(int ms) { deadline_ = Clock_::now() + MilliSeconds_(ms); }
-    void Set() { Set(default_period_); }
-    void Reset() { deadline_.reset(); }
-    void SetDefault(int ms) { default_period_ = ms; }
-    void Wait() const { if (IsPending()) std::this_thread::sleep_until(*deadline_); }
-    bool IsSet() const { return deadline_.has_value(); }
-    bool IsExpired() const { return deadline_.has_value() && (Clock_::now() > *deadline_); }
-    bool IsPending() const { return IsSet() && !IsExpired(); }
-    std::optional<int> GetRemaining() const {
-        if (!IsSet()) return std::nullopt;
-        auto remaining = *deadline_ - Clock_::now();
-        int remaining_ms = static_cast<int>(std::chrono::ceil<MilliSeconds_>(remaining).count());
-        if (remaining_ms > 0) return remaining_ms;
-        else return 0;
-    }
-};
-
-class Stopwatch {
-private:
-    using Clock_ = std::chrono::steady_clock;
-    using MilliSeconds_ = std::chrono::milliseconds;
-    std::optional<Clock_::time_point> start_;
-    std::optional<Clock_::time_point> stop_;
-
-public:
-    Stopwatch(bool start = true) { if (start) Start(); }
-    
-    void Start() { 
-        if (start_.has_value() && stop_.has_value()) {
-            start_ = Clock_::now() - *stop_ + *start_;
-        }
-        else {
-            start_ = Clock_::now(); 
-        }
-        stop_.reset();
-    }
-    void Stop() { if (start_.has_value()) stop_ = Clock_::now(); }
-    void Reset() { 
-        start_.reset();
-        stop_.reset(); 
-    }
-    std::optional<int> Read() const { 
-        if (!start_.has_value()) return std::nullopt;
-        auto delta = stop_.has_value() ? (*stop_ - *start_) : (Clock_::now() - *start_);
-        return static_cast<int>(std::chrono::duration_cast<MilliSeconds_>(delta).count()); 
-    }
-    void Print() const {
-        auto value = Read();
-        if (value.has_value()) {
-            std::cout << "Time elapsed: " << *value << " ms\n";
-        }
-        else {
-            std::cout << "stopwatch wasn't running!\n";
-        }
-    }
 };
 
 struct DenonState {
