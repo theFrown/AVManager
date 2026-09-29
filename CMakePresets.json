@@ -1,0 +1,40 @@
+{
+    "version": 6,
+    "configurePresets": [
+        {
+            "name": "windows-msvc",
+            "hidden": true,
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "architecture": { "value": "x64", "strategy": "external" },
+            "cacheVariables": { 
+                "CMAKE_CXX_COMPILER": "cl.exe",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        },
+        {
+            "name": "windows-debug",
+            "inherits": "windows-msvc",
+            "displayName": "Debug",
+            "description": "Default build using Ninja in Windows in debug mode",
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug"}
+        },
+        {
+            "name": "windows-release",
+            "inherits": "windows-msvc",
+            "displayName": "Release",
+            "description": "Release build using Ninja on Windows in release mode",
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "windows-debug",
+            "configurePreset": "windows-debug"
+        },
+        {
+            "name": "windows-release",
+            "configurePreset": "windows-release"
+        }        
+    ]
+}
