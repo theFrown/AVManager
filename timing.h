@@ -37,6 +37,12 @@ public:
 };
 
 class Stopwatch {
+/*
+Most methods take a single optional argument 'bool reset', which defaults to false. When set 
+to true the method will switch out the atomic operation used for the base function of the 
+method to an operation that combines that original function with reseting the timer value. 
+Exceptions: the constructor, where reset doesn't make sense, and Reset() itself.
+*/
 private:
     using Clock_ = std::chrono::steady_clock;
     using MilliSeconds_ = std::chrono::milliseconds;
@@ -53,9 +59,14 @@ public:
     Stopwatch& operator=(Stopwatch&&) = delete;
 
     static_assert(std::atomic<Clock_::time_point>::is_always_lock_free);
-    void Start() { 
-        Clock_::time_point expected = zero_;
-        start_.compare_exchange_strong(expected, Clock_::now());
+    void Start(bool reset = false) {
+        if (reset) {
+            start_.store(Clock_::now());
+        }
+        else {
+            Clock_::time_point expected = zero_;
+            start_.compare_exchange_strong(expected, Clock_::now());
+        }
     }
     void Reset() { start_.store(zero_); }
     std::optional<int> Read(bool reset = false) {

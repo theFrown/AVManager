@@ -6,7 +6,7 @@ Where the project is going and why. Working document: it is updated as decisions
 
 - Every item has a **permanent number**. Numbers are never reused or renumbered, even when
   an item is finished, dropped or moved to another stage. New items take the next free
-  number, whichever stage they land in. **Next free number: 40.**
+  number, whichever stage they land in. **Next free number: 42.**
 - Tags say what kind of work an item is: `feature`, `bug`, `refactor`, `test`, `infra`,
   `docs`, `decision` (a question to settle before building), `investigate`.
 - Status: ⬜ open · 🚧 in progress · ✅ done · ✖ dropped. Finished items stay where they are.
@@ -67,27 +67,26 @@ The event-driven control loop is rebuilt only as far as this needs.
 
 - **1** · 🚧 · `feature` — Sleep-driven control loop: receive without waiting, then sleep
   until the nearest pending deadline or a 1 s heartbeat, instead of re-checking every 15 ms.
-  Written; blocked on item 3.
+  Written; no longer blocked (item 3 done).
 - **2** · 🚧 · `feature` — Key handling in the controller: read the hook's key counters,
   turn them into requested volume / mute / channel-level changes, clamp to limits.
   Written; not yet tested end to end (needs items 7 and 8).
-- **3** · ⬜ · `bug` — A stale response deadline makes the idle loop spin after a ping or
+- **3** · ✅ · `bug` — A stale response deadline makes the idle loop spin after a ping or
   resync. The deadline should be set by whoever starts a request (`SyncOut`), not by the
   transport (`Send`).
 - **4** · ⬜ · `feature` — Resync as its own control mode. Entered from Rest it settles all
   three states itself on exit; entered from Request it returns to Request. Audit every
   comparison against the control mode when adding it.
-- **5** · ⬜ · `bug` — `SyncResolve` must not judge a request that hasn't been sent yet. The
+- **5** · ✅ · `bug` — `SyncResolve` must not judge a request that hasn't been sent yet. The
   condition is "unsent work exists", not a timer state (treating an unset deadline as
   "wait" creates a stuck state).
 - **6** · ⬜ · `refactor` — Once 3–5 land: remove Request-setting from `SyncOut` and the
   Rest→Report workaround in `ControlPing`.
-- **7** · 🚧 · `feature` — Keyboard wake: the hook callback posts a content-free "look
+- **7** · ✅ · `feature` — Keyboard wake: the hook callback posts a content-free "look
   again" message to the control thread. Clear the registered thread ID when the loop exits.
-- **8** · ⬜ · `feature` — `main` runs the keyboard hook and the control loop together.
+- **8** · ✅ · `feature` — `main` runs the keyboard hook and the control loop together.
 - **9** · ⬜ · `bug` — `SyncOut` has no channel-volume branch, so Ctrl or Alt + volume ends
   the control loop.
-- **10** · ⬜ · `test` — Measure idle CPU before and after the sleep-driven loop.
 - **11** · ⬜ · `decision` — The Ctrl+Alt+End quit shortcut in the hook callback: keep, remap
   or remove. (With the hook on its own thread it stops the hook, not the program.)
 
@@ -149,6 +148,12 @@ goes on the side whose other half can be faked.
   sleep and log loudly.
 - **33** · ⬜ · `feature` — Track which receiver values have actually been reported, so a
   default can't pass for a reading.
+- **41** · ⬜ · `bug` — A keyup is routed by the modifiers held *when it happens*, not by
+  its keydown: release the modifier before the key and the press ends on a different route.
+  Windows can get unpaired events, and `isdown` flags can stick (e.g. `vup.ctrl.isdown`
+  stays true). Fix: fix the route at the start of each press and send repeats and the keyup
+  the same way (hook-thread-only state, no atomics). **Must land before item 35**, which
+  will read `isdown`.
 
 ## Stage 5 — Further features
 
@@ -159,9 +164,22 @@ goes on the side whose other half can be faked.
 - **36** · ⬜ · `feature` — Audio-mode monitor: compare what the receiver is decoding with
   what Windows is sending, and localise mismatches. Starts with a baseline capture of the
   Windows audio state.
+- **40** · ⬜ · `investigate` — Decode the extra lines the receiver sends after our queries
+  and as unsolicited events (samples in `DenonProtocol.h`; none appear in the command tables
+  we have). Promising for goal 1B: `SYSDA` (apparently the incoming audio format),
+  `OPINFINS` (apparently which input channels are present), `OPINFASP` (apparently which
+  speakers are active), `SSINFAISSIG` (an input-signal code). Decode by controlled
+  experiment: change the source (stereo, 7.1 LPCM, bitstream) and see which lines change.
+  Feeds item 36; the recorded samples also seed the simulator (item 21).
 
 ## Unscheduled
 
+- **10** · ⬜ · `test` — Performance measurement as its own topic: count control-loop
+  wakes, read per-thread CPU time (`GetThreadTimes` / `QueryThreadCycleTime` are running
+  totals, so no sampling gaps), and use Process Explorer's per-thread context-switch and
+  cycle columns. Measure release builds at low verbosity — at debug verbosity the terminal
+  drawing our log output dominates. (Moved out of Stage 1; test builds read ~2.5 % CPU in
+  Task Manager, which is good enough for now.)
 - **37** · ⬜ · `feature` — Staged keyboard-hook startup, each stage proven: thread running →
   message loop reachable → a keystroke reached the hook.
 - **38** · ⬜ · `test` — More per-request latency samples from the receiver (first sample:

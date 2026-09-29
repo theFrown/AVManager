@@ -11,7 +11,10 @@
 #include <windows.h>    //lean + nomin in CMakeLists
 #include "AVRHandler.h"
 #include "DenonProtocol.h"
+#include "keyboard.h"
 #include "timing.h"
+
+#include <thread> //remove after debug
 
 AVRHandler::AVRHandler(Verbosity verbosity) 
     : verbosity_(verbosity)
@@ -77,11 +80,14 @@ AVRHandler::~AVRHandler() {
 }
 
 int AVRHandler::ControlLoop() {
+    KeyboardHook::KeyListener key_listener;
+    Stopwatch test_sw{true};
     Report_ response = ControlPing(false);
+    test_sw.Print();
     if (response != Report_::OK) {
         return 1; //issue with comms
     }
-    Stopwatch test_sw{true};
+    test_sw.Start(true);
     response = ControlResync();
     test_sw.Print();
     if (response != Report_::OK) {
@@ -91,7 +97,10 @@ int AVRHandler::ControlLoop() {
     Timer test_deadline{50, true};
     int test_stage = 0;
     // int test_db = -300;
-    
+    int test_backup_volume = 0;
+    std::optional<KeyboardHook::KeyListener> test_key_listener;
+    std::thread test_worker;
+
     while (stayalive) {
 
         //test infrastructure below v v
@@ -99,88 +108,65 @@ int AVRHandler::ControlLoop() {
             switch (test_stage) {
                 case 0:
                     Print("\n-------waiting for straggler messages-------\n\n");
+                    test_sw.Start(true);
                     test_deadline.Set(5000);
-                    test_sw.Reset();
-                    test_sw.Start();
                     break;
                 case 1:
                     test_sw.Print();
                     Print("\n------------volume up to -26db------------\n\n");
+                    test_backup_volume = reported_.volume;
                     requested_.volume = -260;
-                    control_mode_ = ControlMode_::Request;
+                    // control_mode_ = ControlMode_::Request;
                     test_deadline.Set(2500);
                     break;
                 case 2:
                     Print("\n------------volume down to -31db------------\n\n");
                     requested_.volume = -310;
-                    control_mode_ = ControlMode_::Request;
+                    // control_mode_ = ControlMode_::Request;
                     test_deadline.Set(2500);
                     break;
                 case 3:
-                    Print("\n------------busy-wait---------------\n\n");
+                    Print("\n------------5 second normal loop---------------\n\n");
+                    test_sw.Start(true);
                     test_deadline.Set(5000);
-                    test_sw.Reset();
-                    test_sw.Start();
                     break;
                 case 4:
                     test_sw.Print();
-                    Print("\n------------interrupted busy-wait-----------\n\n");
-                    test_deadline.Set(1250);
-                    test_sw.Reset();
-                    test_sw.Start();
+                    Print("\n------------5 second stalled loop-----------\n\n");
+                    test_sw.Start(true);
+                    test_deadline.Set(5000);
+                    test_deadline.Wait();
                     break;
                 case 5:
-                    {
-                        VerbosityOverride vo{verbosity_, Verbosity::Trace};
-                        ControlSleep(2500);
-                    }
-                    test_deadline.Set(1250);
+                    test_sw.Print();
+                    Print("\n------------second keyboardhook 5 second loop-----------\n\n");
+                    test_key_listener.emplace();
+                    test_sw.Start(true);
+                    test_deadline.Set(5000);
                     break;
                 case 6:
                     test_sw.Print();
-                    Print("\n------------clean resync-----------\n\n");
-                    test_deadline.Set(1250);
-                    test_sw.Reset();
-                    test_sw.Start();
-                    ControlResync();
+                    Print("\n------------second keyboardhook destroyed 5 second loop--------\n\n");
+                    test_key_listener.reset();
+                    test_sw.Start(true);
+                    test_deadline.Set(5000);
+                    break;
+                case 7:
                     test_sw.Print();
+                    Print("\n------------injecting fake thread ID--------\n\n");
+                    test_worker = std::thread(&KeyboardHook::KeyListener::ThreadIdSwapper);
+                    test_deadline.Set(5000);
                     break;
-                case 7: 
-                    Print("\n------------broken resync-----------\n\n");
-                    test_deadline.Set(1250);
-                    event_healthy_ = false;
-                    test_sw.Reset();
-                    test_sw.Start();
-                    ControlResync();
+                case 8:
+                    test_sw.Start(true);
+                    test_worker.join();
                     test_sw.Print();
-                    event_healthy_ = true;
-                    break;
-                case 8: {
-                    Print("\n------------injected window message-------\n\n");
-                    PostThreadMessage(GetCurrentThreadId(), WM_APP, 0, 0);
-                    {
-                        VerbosityOverride vo{verbosity_, Verbosity::Trace};
-                        ControlSleep(2500);
-                    }
-                    event_healthy_ = false;
-                    {
-                        VerbosityOverride vo{verbosity_, Verbosity::Trace};
-                        ControlSleep(2500);
-                    }
-                    MSG msg = {};
-                    PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE);
-                    {
-                        VerbosityOverride vo{verbosity_, Verbosity::Trace};
-                        ControlSleep(2500);
-                    }
-                    test_deadline.Set(1250);
-                    event_healthy_ = true;
-                    break;
-                }
-                case 9:
-                    Print("\n------------end of test-----------\n\n");
+                    Print("\n------------check if keys work at normal rate again\n\n");
+                    test_deadline.Set(5000);
                     break;
                 default:
+                    Print("\n------------end of test-----------\n\n");
+                    Send(MakeCommand(denon_cmd::volume_prefix, test_backup_volume));
                     stayalive = false;
                     break;
             }
@@ -188,17 +174,25 @@ int AVRHandler::ControlLoop() {
         }
         //test infrastructure above ^ ^
 
+        //reading keys: making sure requested_ is up-to-date through SyncKeys
+        SyncKeys();
+
         //receiving: making sure reported_ is up-to-date through SyncIn
-        response = ControlReceive(10);
+        response = ControlReceive();
         if ((response == Report_::SocketError) || (response == Report_::Disconnected)) {
             return 3; //issue in receive loop
         }
 
         //sending: making sure commanded_ is up-to-date through SyncOut
-        if ((commanded_ != requested_) && !command_cooldown_.IsPending()) {
-            response = SyncOut();
-            if (response != Report_::OK) {
-                return 4; //problem with Send
+        if (!command_cooldown_.IsPending()) {
+            if (commanded_ != requested_) {
+                response = SyncOut();
+                if (response != Report_::OK) {
+                    return 4; //problem with Send
+                }
+            }
+            else {
+                command_cooldown_.Reset(); //cheaper to always run than checking if it was set
             }
         }
 
@@ -212,6 +206,12 @@ int AVRHandler::ControlLoop() {
                 }
             }
         }
+
+        //sleeping until earliest event or nearest deadline
+        std::optional<int> deadline = command_cooldown_.GetRemaining();
+        if (!deadline.has_value()) deadline = response_deadline_.GetRemaining();
+        if (!deadline.has_value()) deadline = heartbeat_interval_;
+        ControlSleep(*deadline);
     }
     return 0;
 }
@@ -228,6 +228,9 @@ auto AVRHandler::ControlPing(bool silent, bool block, int time_out) -> Report_ {
     Print(Verbosity::Debug, "Testing coms channel\n");
     signal_ = denon_cmd::power_prefix;
     signal_received_ = false;
+    if (control_mode_ == ControlMode_::Rest) {
+        control_mode_ = ControlMode_::Report;
+    }
     Report_ response = Send(denon_cmd::power_status, block);
     Timer deadline;
     if ((!block) || (response != Report_::OK)) {
@@ -390,10 +393,41 @@ auto AVRHandler::ControlSleep(int ms) -> Waker_ { //TODO: consider intentionally
             return Waker_::Failed;
         }
         default:
-            Print(Verbosity::Error, std::format("Sleep function failed for unknown reason with"
+            Print(Verbosity::Error, std::format("Sleep function failed for unknown reason with "
                                                 "response: {}\n", response));
             return Waker_::Unknown;
     }
+}
+
+auto AVRHandler::SyncKeys() -> Report_ {
+    KeyStates& keys = KeyboardHook::raw_keys;
+    auto error = KeyboardHook::GetError(true);
+    if (error.has_value()) {
+        switch (*error) {
+            case ERROR_INVALID_THREAD_ID:
+                Print(Verbosity::Error, "KeyboardHook failed to call thread message, reports "
+                                        "Invalid ID\n");
+                break;
+            case ERROR_NOT_ENOUGH_QUOTA:
+                Print(Verbosity::Error, "KeyboardHook failed to call thread message, reports "
+                                        "Queue Full\n");
+                break;
+            case ERROR_ACCESS_DENIED:
+                Print(Verbosity::Error, "KeyboardHook failed to call thread message, reports "
+                                        "Access Denied\n");
+                break;
+            default:
+                Print(Verbosity::Error, std::format("KeyboardHook failed to call thread message "
+                                                    "with unknown error: {}\n", *error));
+        }
+    }
+    std::optional<int> delay = keys.processing_delay.Read(true);
+    if (delay.has_value()) {
+        Print(Verbosity::Debug, std::format("key stroke processing delay is {}\n", *delay));
+    }
+
+    return Report_::NoData;
+
 }
 
 auto AVRHandler::SyncIn() -> Report_ {
@@ -534,12 +568,13 @@ auto AVRHandler::SyncOut() -> Report_ {
         response = Report_::BadInput;
     }
     PrintStates(Verbosity::Debug);
+    if (response == Report_::OK) response_deadline_.Set();
     return response;
 }
 
 auto AVRHandler::SyncResolve() -> Report_ {
     if (control_mode_ == ControlMode_::Request) {
-        if (response_deadline_.IsPending()) { 
+        if (command_cooldown_.IsPending() || response_deadline_.IsPending()) { 
             return Report_::Wait;
         }
         else {
@@ -553,7 +588,6 @@ auto AVRHandler::SyncResolve() -> Report_ {
                     commanded_ = requested_;
                 }
                 failed_syncs_ = 0;
-                command_cooldown_.Reset();
                 response_deadline_.Reset();
                 control_mode_ = ControlMode_::Rest;
                 PrintStates(Verbosity::Debug);
@@ -587,7 +621,6 @@ auto AVRHandler::SyncResolve() -> Report_ {
         }
         commanded_ = requested_ = reported_;
         failed_syncs_ = 0;
-        command_cooldown_.Reset();
         response_deadline_.Reset();
         control_mode_ = ControlMode_::Rest;
         PrintStates(Verbosity::Debug);
@@ -754,7 +787,6 @@ auto AVRHandler::Send(std::string_view cmd, bool wait) -> Report_ {
     Print(Verbosity::Info, std::format("Sending following command to AVR: [{}]\n", cmd));
     int response = send(socket_, full.data(), static_cast<int>(full.size()), 0);
     command_cooldown_.Set();
-    response_deadline_.Set();
     if (response == SOCKET_ERROR) {
         response = WSAGetLastError();
         Print(Verbosity::Warning, std::format("Failed to send command: [{}], with error: {}\n", cmd,

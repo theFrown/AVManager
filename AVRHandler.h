@@ -81,8 +81,9 @@ private:
     constexpr static const char* ip_string_ = "192.168.1.200";
     constexpr static int port_ = 23;
     constexpr static size_t inbufferlen_ = 270; //2x denon message max size (135 chars)
+    int heartbeat_interval_ = 1000;
     Timer command_cooldown_{50};
-    Timer response_deadline_{200};
+    Timer response_deadline_{200}; //default should be longer than command_cooldown_'s!
     
     std::array<char, inbufferlen_ + 1> inbuffer_ = {};
     std::string inchain_;
@@ -106,6 +107,7 @@ private:
     Report_ ControlResync();
     Report_ ControlReceive(int time_out_ms = 0);
     Waker_  ControlSleep(int ms);
+    Report_ SyncKeys();
     Report_ SyncIn();
     Report_ SyncInString(std::string_view message, std::string_view prefix, 
                       std::string_view report_string, std::string& report_slot);

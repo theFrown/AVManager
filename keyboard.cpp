@@ -161,11 +161,13 @@ LRESULT CALLBACK KeyboardHook::ProcessKeys(int nCode, WPARAM wParam, LPARAM lPar
                 break;
             case VK_VOLUME_UP:
                 if (ProcessCombo(raw_keys.vup, keydown, ctrldown, altdown, shiftdown)) {
+                    WakeListener();
                     return swallow_key_value_;
                 }
                 break;
             case VK_VOLUME_DOWN:
                 if (ProcessCombo(raw_keys.vdown, keydown, ctrldown, altdown, shiftdown)) {
+                    WakeListener();
                     return swallow_key_value_;
                 }
                 break;
@@ -184,8 +186,12 @@ LRESULT CALLBACK KeyboardHook::ProcessKeys(int nCode, WPARAM wParam, LPARAM lPar
                         raw_keys.mute.isdown.store(true);
                     }
                     else {
+                        if (ctrldown && altdown) {
+                            return swallow_key_value_; 
+                        }
                         raw_keys.mute.isdown.store(false);
                     }
+                    WakeListener();
                     return swallow_key_value_;
                 }
                 break;
@@ -228,6 +234,15 @@ bool KeyboardHook::ProcessCombo(KeyStates::Combos& keycombo, bool keydown, bool 
         keycombo.bare.isdown.store(false);
     }
     return true;
+}
+
+void KeyboardHook::WakeListener() {
+    raw_keys.processing_delay.Start();
+    DWORD thread_id = listener_thread_id_.load();
+    if (thread_id) {
+        bool response = PostThreadMessage(thread_id, WM_APP, 0, 0);
+        if (!response) listener_last_error_.store(GetLastError());
+    }
 }
 
 bool KeyboardHook::PingKey() {
