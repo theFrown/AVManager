@@ -6,7 +6,7 @@ Where the project is going and why. Working document: it is updated as decisions
 
 - Every item has a **permanent number**. Numbers are never reused or renumbered, even when
   an item is finished, dropped or moved to another stage. New items take the next free
-  number, whichever stage they land in. **Next free number: 42.**
+  number, whichever stage they land in. **Next free number: 44.**
 - Tags say what kind of work an item is: `feature`, `bug`, `refactor`, `test`, `infra`,
   `docs`, `decision` (a question to settle before building), `investigate`.
 - Status: ⬜ open · 🚧 in progress · ✅ done · ✖ dropped. Finished items stay where they are.
@@ -29,16 +29,6 @@ Where the project is going and why. Working document: it is updated as decisions
 2. Learn and practice: expand my knowledge of C++, deliberately try interesting constructs
    and Windows features, and practice professional standards, including Git, CI/CD and
    simulators for HIL/SIL testing, with a history that explains itself.
-
-**How this is built**
-
-I'm learning C++ and Windows programming through this project, and all code here is written
-by me. I use Claude (via Claude Code) as a tutor: to discuss design decisions ("This feels
-a bit Pythonic, how would a seasoned C++ developer approach it?"), to check assumptions
-("Can we rely on this Windows API returning X even if Y?"), to learn under-the-hood
-fundamentals ("Will using a local here cost me more cycles than having a persistent class
-member?"), and to review my changes before I commit them. The roadmap, commit messages and
-some of the other project documents are co-written with Claude.
 
 **Principles**
 
@@ -92,7 +82,7 @@ The event-driven control loop is rebuilt only as far as this needs.
 
 ## Stage 2 — Public release and CI
 
-- **12** · ⬜ · `docs` — README: purpose, status, how to build, architecture overview, link
+- **12** · 🚧 · `docs` — README: purpose, status, how to build, architecture overview, link
   to Denon's official control protocol document.
 - **13** · ⬜ · `test` — GoogleTest via CMake `FetchContent`, registered with CTest. Port the
   existing dB-conversion test to it.
@@ -154,6 +144,15 @@ goes on the side whose other half can be faked.
   stays true). Fix: fix the route at the start of each press and send repeats and the keyup
   the same way (hook-thread-only state, no atomics). **Must land before item 35**, which
   will read `isdown`.
+- **42** · ⬜ · `feature` — Swallow volume keys only while a listener is registered, so a
+  control loop that exits (or gives up its listener on purpose) hands the keys straight back
+  to Windows — fail-safe by construction, even with the hook still running. Counting and
+  signalling can't be ordered race-free, so a failed wake may act twice once (Windows now,
+  receiver later); remember the failure so later keys, including held-key repeats, go
+  straight to Windows.
+- **43** · ⬜ · `decision` — Design `main` properly: startup order, supervising and
+  restarting the control loop after a failure while the hook keeps running, and shutdown.
+  Ties in with items 25, 26 and 30.
 
 ## Stage 5 — Further features
 
@@ -164,7 +163,7 @@ goes on the side whose other half can be faked.
 - **36** · ⬜ · `feature` — Audio-mode monitor: compare what the receiver is decoding with
   what Windows is sending, and localise mismatches. Starts with a baseline capture of the
   Windows audio state.
-- **40** · ⬜ · `investigate` — Decode the extra lines the receiver sends after our queries
+- **40** · 🚧 · `investigate` — Decode the extra lines the receiver sends after our queries
   and as unsolicited events (samples in `DenonProtocol.h`; none appear in the command tables
   we have). Promising for goal 1B: `SYSDA` (apparently the incoming audio format),
   `OPINFINS` (apparently which input channels are present), `OPINFASP` (apparently which
