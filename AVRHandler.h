@@ -7,6 +7,8 @@
 #include <winsock2.h>
 #include "timing.h"
 
+struct KeyStates; //defined in keyboard.h, pulled in by AVRHandler.cpp before SyncKeys uses it
+
 enum class Verbosity { Silent, Error, Warning, Info, Debug, Trace};
 
 class VerbosityOverride {
@@ -62,10 +64,13 @@ public:
     AVRHandler& operator=(const AVRHandler&) = delete;
     AVRHandler& operator=(AVRHandler&&) = delete;
 
-    bool stayalive = false;
-    int status = -1;
+    enum class ExitCode { Normal, Ping, Sync, Key, Receive, Send, Resync };
+    enum class CtorCode { Healthy, Unknown, SocketSetupFailed, ConnectionFailed };
 
-    int ControlLoop();
+    bool stayalive = false;
+
+    ExitCode ControlLoop();
+    CtorCode GetCtorStatus() const { return ctor_status_; }
 
     //helper functions, public only so they can be externally tested
     static std::string MakeCommand(std::string cmd, std::optional<int> num = std::nullopt);
@@ -74,14 +79,22 @@ public:
     static std::string PrintDb(int value, int width = 0);
 
 private:
-    enum class Report_ { OK, Data, NoData, Wait, Unknown, BadInput, Disconnected, SocketError };
-    enum class Waker_ { ComsReady, WindowMessageIn, TimeOut, Failed, Unknown};
+    enum class Report_ { OK, Data, NoData, Wait, Unknown, BadInput, Disconnected, SocketError, 
+                         KeyError };
+    enum class Waker_ { ComsReady, WindowMessageIn, TimeOut, Failed, Unknown };
     enum class ControlMode_ { Request, Report, Rest };
     
     constexpr static const char* ip_string_ = "192.168.1.200";
     constexpr static int port_ = 23;
     constexpr static size_t inbufferlen_ = 270; //2x denon message max size (135 chars)
-    int heartbeat_interval_ = 1000;
+    constexpr static int heartbeat_interval_ = 1000;
+    constexpr static int min_volume = -800; //in 0.1db
+    constexpr static int min_chanvol = -120;
+    constexpr static int max_chanvol = 120;
+    constexpr static int max_volume_increase_steps = 10; //large volume jumps hurt ears and speakers
+    constexpr static int key_sync_warn_delay_ = 100; //below is probably hard to notice in practice
+    constexpr static int key_sync_error_delay_ = static_cast<int>(1.1 * heartbeat_interval_);
+    int volume_step_ = 5; //the only one that can be changed in the denon
     Timer command_cooldown_{50};
     Timer response_deadline_{200}; //default should be longer than command_cooldown_'s!
     
@@ -102,18 +115,24 @@ private:
     bool connection_healthy_ = false;
     bool connection_shutting_down_ = false;
     bool event_healthy_ = false;
+    CtorCode ctor_status_ = CtorCode::Unknown;
 
     Report_ ControlPing(bool silent = true, bool block = true, int time_out = 1000);
     Report_ ControlResync();
     Report_ ControlReceive(int time_out_ms = 0);
     Waker_  ControlSleep(int ms);
-    Report_ SyncKeys();
+    Report_ SyncKeyHook(bool flush = false);
+    int     SyncKeys(KeyStates&);
+    bool    SyncVolumeKey(int steps, int& stored_value, int min, int max);
     Report_ SyncIn();
+    Report_ SyncInChanvols(std::string_view message);
     Report_ SyncInString(std::string_view message, std::string_view prefix, 
                       std::string_view report_string, std::string& report_slot);
     Report_ SyncInDb(std::string_view message, std::string_view prefix, 
                       std::string_view report_string, int& report_slot);
     Report_ SyncOut();
+    Report_ SyncOutChanvols();
+    Report_ SyncOutDb(const std::string& prefix, int value, int& slot);
     Report_ SyncResolve();
     Report_ SetupSocket();
     Report_ Connect();

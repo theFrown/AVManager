@@ -6,7 +6,7 @@ Where the project is going and why. Working document: it is updated as decisions
 
 - Every item has a **permanent number**. Numbers are never reused or renumbered, even when
   an item is finished, dropped or moved to another stage. New items take the next free
-  number, whichever stage they land in. **Next free number: 44.**
+  number, whichever stage they land in. **Next free number: 45.**
 - Tags say what kind of work an item is: `feature`, `bug`, `refactor`, `test`, `infra`,
   `docs`, `decision` (a question to settle before building), `investigate`.
 - Status: ⬜ open · 🚧 in progress · ✅ done · ✖ dropped. Finished items stay where they are.
@@ -44,9 +44,11 @@ Where the project is going and why. Working document: it is updated as decisions
   and tests against the real receiver run locally before merging. Untested work lives on a
   short-lived branch.
 
-**Current focus: Stage 1.**
+**Current focus:** closing Stage 1 with a clean-up (items 11, 24), then a first CI pass
+(items 13–15) so the Stage 3 split happens with tests underneath. Items 16 and 17 follow
+the split.
 
-**Open strategic questions:** items 11, 18, 19, 25.
+**Open strategic questions:** items 11, 19, 25.
 
 ---
 
@@ -55,30 +57,32 @@ Where the project is going and why. Working document: it is updated as decisions
 The first milestone that makes the program useful: press a volume key, the receiver moves.
 The event-driven control loop is rebuilt only as far as this needs.
 
-- **1** · 🚧 · `feature` — Sleep-driven control loop: receive without waiting, then sleep
+- **1** · ✅ · `feature` — Sleep-driven control loop: receive without waiting, then sleep
   until the nearest pending deadline or a 1 s heartbeat, instead of re-checking every 15 ms.
-  Written; no longer blocked (item 3 done).
-- **2** · 🚧 · `feature` — Key handling in the controller: read the hook's key counters,
+- **2** · ✅ · `feature` — Key handling in the controller: read the hook's key counters,
   turn them into requested volume / mute / channel-level changes, clamp to limits.
-  Written; not yet tested end to end (needs items 7 and 8).
+  Tested end to end on the receiver: main volume, centre, surrounds, limits, mute, and
+  remote-control changes flowing back. Keys pressed during startup are discarded.
 - **3** · ✅ · `bug` — A stale response deadline makes the idle loop spin after a ping or
   resync. The deadline should be set by whoever starts a request (`SyncOut`), not by the
   transport (`Send`).
-- **4** · ⬜ · `feature` — Resync as its own control mode. Entered from Rest it settles all
-  three states itself on exit; entered from Request it returns to Request. Audit every
-  comparison against the control mode when adding it.
 - **5** · ✅ · `bug` — `SyncResolve` must not judge a request that hasn't been sent yet. The
   condition is "unsent work exists", not a timer state (treating an unset deadline as
   "wait" creates a stuck state).
-- **6** · ⬜ · `refactor` — Once 3–5 land: remove Request-setting from `SyncOut` and the
-  Rest→Report workaround in `ControlPing`.
 - **7** · ✅ · `feature` — Keyboard wake: the hook callback posts a content-free "look
   again" message to the control thread. Clear the registered thread ID when the loop exits.
 - **8** · ✅ · `feature` — `main` runs the keyboard hook and the control loop together.
-- **9** · ⬜ · `bug` — `SyncOut` has no channel-volume branch, so Ctrl or Alt + volume ends
+- **9** · ✅ · `bug` — `SyncOut` has no channel-volume branch, so Ctrl or Alt + volume ends
   the control loop.
 - **11** · ⬜ · `decision` — The Ctrl+Alt+End quit shortcut in the hook callback: keep, remap
   or remove. (With the hook on its own thread it stops the hook, not the program.)
+- **24** · 🚧 · `refactor` — Clean-up, limited to what survives the Stage 3 split:
+  `explicit` on `AVRHandler`'s single-argument constructor; consistent member naming
+  (trailing `_` on the new private constants; `stayalive` is public and writable);
+  consistent reset defaults between `KeyboardHook::GetError` and `Stopwatch::Read`.
+  Done: `explicit` on `Timer` and `Stopwatch`, both in `timing.h`; construction failure is
+  reported through a status member with a getter for now (setup moves into the receiver
+  link's startup in Stage 3).
 
 ## Stage 2 — Public release and CI
 
@@ -94,7 +98,7 @@ The event-driven control loop is rebuilt only as far as this needs.
   GitHub Release.
 - **17** · ⬜ · `investigate` — Can GitHub's hosted Windows runners run tests that need a
   low-level keyboard hook and `SendInput`?
-- **18** · ⬜ · `decision` — When to make the repository public.
+- **18** · ✅ · `decision` — When to make the repository public. Public since October 2026.
 
 ## Stage 3 — Split `AVRHandler` along the test seam
 
@@ -113,9 +117,14 @@ goes on the side whose other half can be faked.
 - **22** · ⬜ · `test` — Controller tests against the fake and the simulator: state
   transitions, retry, escalation to resync.
 - **23** · ⬜ · `refactor` — Move the test scaffolding out of `ControlLoop`.
-- **24** · 🚧 · `refactor` — Cleanups: `explicit` single-argument constructors; `Timer` and
-  `Stopwatch` in their own headers; consistent member naming; how a failed construction is
-  reported (factory function versus a status member).
+- **4** · ⬜ · `feature` — Resync as its own control mode. Entered from Rest it settles all
+  three states itself on exit; entered from Request it returns to Request. Audit every
+  comparison against the control mode when adding it. Today only startup resyncs from Rest
+  (discard keys pressed meanwhile, then settle); this becomes necessary once reconnect
+  (item 30) or periodic resyncs exist.
+- **6** · ⬜ · `refactor` — Remove the Rest→Report workaround in `ControlPing` (no longer
+  needed since item 3) and the Request-setting in `SyncOut` (still relied on by the test
+  scaffolding, see item 23).
 
 ## Stage 4 — Threading and robustness
 
@@ -152,14 +161,16 @@ goes on the side whose other half can be faked.
   straight to Windows.
 - **43** · ⬜ · `decision` — Design `main` properly: startup order, supervising and
   restarting the control loop after a failure while the hook keeps running, and shutdown.
-  Ties in with items 25, 26 and 30.
+  Includes which failures should end the loop at all (e.g. an excessive key-processing
+  delay currently does). Ties in with items 25, 26 and 30.
 
 ## Stage 5 — Further features
 
 - **34** · ⬜ · `feature` — On-screen volume display over windowed and borderless-fullscreen
   apps.
 - **35** · ⬜ · `feature` — Hold acceleration: a middleware thread between hook and
-  controller that turns held keys into larger steps.
+  controller that turns held keys into larger steps. Also decides what holding mute does
+  (today every auto-repeat counts as a separate press).
 - **36** · ⬜ · `feature` — Audio-mode monitor: compare what the receiver is decoding with
   what Windows is sending, and localise mismatches. Starts with a baseline capture of the
   Windows audio state.
@@ -183,7 +194,12 @@ goes on the side whose other half can be faked.
   message loop reachable → a keystroke reached the hook.
 - **38** · ⬜ · `test` — More per-request latency samples from the receiver (first sample:
   37 ms).
-- **39** · ⬜ · `bug` — Alt + volume at a limit beeps twice (once per surround channel).
+- **39** · ⬜ · `bug` — The limit beep fires on every clamp: twice for Alt + volume (once per
+  surround channel), and on every auto-repeat while a key is held at a limit, which turns
+  into a trill. Beep once when a press first reaches the limit.
+- **44** · ⬜ · `bug` — Special values in the receiver's replies are parsed as ordinary
+  levels: `CVSW 00` means subwoofer off (currently read as −50 dB, outside the channel
+  range), and `MV00` means volume off (the receiver displays `---`, not −80 dB).
 
 ---
 
@@ -197,3 +213,5 @@ goes on the side whose other half can be faked.
 - Keyboard hook on its own thread: modifier tracking, key combos mapped to counters, keys
   swallowed, health probes.
 - Mute tracking end to end.
+- Volume keys control the receiver end to end: main volume, centre (Ctrl) and surround
+  (Alt) levels, mute, clamped to the receiver's limits; Shift passes keys to Windows.

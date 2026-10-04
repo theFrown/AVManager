@@ -11,9 +11,9 @@ int main() {
 
     std::cout << "AVManager starting\n";
     AVRHandler avr{Verbosity::Debug};
-    int response = avr.status;
-    if (response != 0) {
-        std::cout << "boo, error:\n" << response << "\n";
+    AVRHandler::CtorCode avr_status = avr.GetCtorStatus();
+    if (avr_status != AVRHandler::CtorCode::Healthy) {
+        std::cout << "boo, error:\n" << static_cast<int>(avr_status) << "\n";
         return 1;
     }
 
@@ -21,7 +21,7 @@ int main() {
     Timer sleeper;
     KeyboardHook keyhook;
     keyhook.PrintStates();
-    response = keyhook.Start() ? 0 : 1;
+    int response = keyhook.Start() ? 0 : 1;
     if (response == 0) {
         std::cout << "yay, good keyboardhook\n";
     }
@@ -34,12 +34,12 @@ int main() {
     sleeper.Set(5000);
     sleeper.Wait(); 
     std::cout << "\n==============TEST LOOP==============\n\n";
-    response = avr.ControlLoop();
+    AVRHandler::ExitCode exitcode = avr.ControlLoop();
     std::cout << "keypresses after control loop:\n";
     sleeper.Set(5000);
     sleeper.Wait();
     keyhook.Stop();
-    if (response == 0) {
+    if (exitcode == AVRHandler::ExitCode::Normal) {
         std::cout << "yay, good loop\n";
     }
     else {

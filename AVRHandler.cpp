@@ -19,18 +19,17 @@
 AVRHandler::AVRHandler(Verbosity verbosity) 
     : verbosity_(verbosity)
 {   
-    status = 1;
     Report_ response = SetupSocket();
     if (response != Report_::OK) {
-        status = 2;
+        ctor_status_ = CtorCode::SocketSetupFailed;
     }
     else {
         response = Connect();
         if (response != Report_::OK) {
-            status = 3;
+            ctor_status_ = CtorCode::ConnectionFailed;
         }
         else {
-            status = 0;
+            ctor_status_ = CtorCode::Healthy;
             stayalive = true;
         }
     }
@@ -79,25 +78,27 @@ AVRHandler::~AVRHandler() {
     WSACleanup();
 }
 
-int AVRHandler::ControlLoop() {
+auto AVRHandler::ControlLoop() -> ExitCode {
     KeyboardHook::KeyListener key_listener;
     Stopwatch test_sw{true};
     Report_ response = ControlPing(false);
     test_sw.Print();
     if (response != Report_::OK) {
-        return 1; //issue with comms
+        return ExitCode::Ping;
     }
     test_sw.Start(true);
     response = ControlResync();
     test_sw.Print();
     if (response != Report_::OK) {
-        return 2; //issue with syncing
+        return ExitCode::Sync;
     }
-    
+    SyncKeyHook(true); //flush any keypresses inbound before we were ready
+    SyncResolve(); //synchronize the 3 states
+
     Timer test_deadline{50, true};
     int test_stage = 0;
     // int test_db = -300;
-    int test_backup_volume = 0;
+    int test_backup_volume = reported_.volume;
     std::optional<KeyboardHook::KeyListener> test_key_listener;
     std::thread test_worker;
 
@@ -114,7 +115,6 @@ int AVRHandler::ControlLoop() {
                 case 1:
                     test_sw.Print();
                     Print("\n------------volume up to -26db------------\n\n");
-                    test_backup_volume = reported_.volume;
                     requested_.volume = -260;
                     // control_mode_ = ControlMode_::Request;
                     test_deadline.Set(2500);
@@ -175,12 +175,15 @@ int AVRHandler::ControlLoop() {
         //test infrastructure above ^ ^
 
         //reading keys: making sure requested_ is up-to-date through SyncKeys
-        SyncKeys();
+        response = SyncKeyHook();
+        if (response == Report_::KeyError) {
+            return ExitCode::Key;
+        }
 
         //receiving: making sure reported_ is up-to-date through SyncIn
         response = ControlReceive();
         if ((response == Report_::SocketError) || (response == Report_::Disconnected)) {
-            return 3; //issue in receive loop
+            return ExitCode::Receive;
         }
 
         //sending: making sure commanded_ is up-to-date through SyncOut
@@ -188,7 +191,7 @@ int AVRHandler::ControlLoop() {
             if (commanded_ != requested_) {
                 response = SyncOut();
                 if (response != Report_::OK) {
-                    return 4; //problem with Send
+                    return ExitCode::Send;
                 }
             }
             else {
@@ -202,7 +205,7 @@ int AVRHandler::ControlLoop() {
             if (response == Report_::Unknown) {
                 response = ControlResync();
                 if (response != Report_::OK) {
-                    return 2; //issue with syncing
+                    return ExitCode::Resync;
                 }
             }
         }
@@ -213,7 +216,7 @@ int AVRHandler::ControlLoop() {
         if (!deadline.has_value()) deadline = heartbeat_interval_;
         ControlSleep(*deadline);
     }
-    return 0;
+    return ExitCode::Normal;
 }
 
 auto AVRHandler::ControlPing(bool silent, bool block, int time_out) -> Report_ {
@@ -399,7 +402,7 @@ auto AVRHandler::ControlSleep(int ms) -> Waker_ { //TODO: consider intentionally
     }
 }
 
-auto AVRHandler::SyncKeys() -> Report_ {
+auto AVRHandler::SyncKeyHook(bool flush) -> Report_ {
     KeyStates& keys = KeyboardHook::raw_keys;
     auto error = KeyboardHook::GetError(true);
     if (error.has_value()) {
@@ -421,13 +424,75 @@ auto AVRHandler::SyncKeys() -> Report_ {
                                                     "with unknown error: {}\n", *error));
         }
     }
+    DenonState backup = requested_;
+    int response = SyncKeys(keys);
     std::optional<int> delay = keys.processing_delay.Read(true);
+    if (flush) {
+        requested_ = backup;
+        return Report_::OK;
+    }
+    if (response > 0) control_mode_ = ControlMode_::Request;
     if (delay.has_value()) {
-        Print(Verbosity::Debug, std::format("key stroke processing delay is {}\n", *delay));
+        if (*delay > key_sync_error_delay_) {
+            Print(Verbosity::Error, std::format("Key stroke processing delay exceeded critical "
+                                                "threshold! delay was {}\n", *delay));
+            return Report_::KeyError;
+        }
+        if (*delay > key_sync_warn_delay_) {
+            Print(Verbosity::Warning, std::format("Key stroke processing delay exceeded perception "
+                                                  "threshold! delay was {}\n", *delay)); 
+        }
+        else {
+            Print(Verbosity::Debug, std::format("Key stroke processing delay was {}\n", *delay));
+        }
+    }
+    return Report_::OK; //only reports success, control_mode_ handles whether there was input
+}
+
+int AVRHandler::SyncKeys(KeyStates& keys) {
+    int requests = 0;
+    int steps = 0;
+    
+    steps = keys.mute.counter.exchange(0);
+    if (steps) {
+        std::string requested;
+        if (steps > 1) {
+            requested = "ON"; //safest interpretation if someone is holding this key down
+        }
+        else {
+            requested = requested_.mute == "ON" ? "OFF" : "ON"; //activate when stored mute is empty
+        }
+        if (requested != requested_.mute) {
+            requests++;
+            requested_.mute = requested;
+        }
     }
 
-    return Report_::NoData;
+    steps = keys.vup.bare.counter.exchange(0) - keys.vdown.bare.counter.exchange(0);
+    if (steps > max_volume_increase_steps) steps = max_volume_increase_steps;
+    requests += SyncVolumeKey(steps, requested_.volume, min_volume, reported_.maxvolume);
 
+    steps = keys.vup.ctrl.counter.exchange(0) - keys.vdown.ctrl.counter.exchange(0);
+    requests += SyncVolumeKey(steps, requested_.chanvol.C, min_chanvol, max_chanvol);
+
+    steps = keys.vup.alt.counter.exchange(0) - keys.vdown.alt.counter.exchange(0);
+    requests += SyncVolumeKey(steps, requested_.chanvol.SL, min_chanvol, max_chanvol);
+    requests += SyncVolumeKey(steps, requested_.chanvol.SR, min_chanvol, max_chanvol);
+    
+    return requests;
+}
+
+bool AVRHandler::SyncVolumeKey(int steps, int& stored_value, int min, int max) {
+    if (steps) {
+        int requested_level = stored_value + steps * volume_step_;
+        int clamped_level = std::clamp(requested_level, min, max);
+        if (requested_level != clamped_level) MessageBeep(0xFFFFFFFF);
+        if (stored_value != clamped_level) {
+            stored_value = clamped_level;
+            return true;
+        }
+    }
+    return false;
 }
 
 auto AVRHandler::SyncIn() -> Report_ {
@@ -461,42 +526,46 @@ auto AVRHandler::SyncIn() -> Report_ {
         }
     }
     else if (message.starts_with(denon_cmd::chanvol_prefix)) {
-        if (message.starts_with(denon_cmd::chanvol_endreport)) {
-            Print(Verbosity::Debug, "Channel volume list complete\n");
-            return Report_::OK;
-        }
-        else if (message.starts_with(denon_cmd::chanvol_FL_prefix)) {
-            return (SyncInDb(message, denon_cmd::chanvol_FL_prefix, "FL offset", 
-                    reported_.chanvol.FL));
-        }
-        else if (message.starts_with(denon_cmd::chanvol_FR_prefix)) {
-            return (SyncInDb(message, denon_cmd::chanvol_FR_prefix, "FR offset", 
-                    reported_.chanvol.FR));
-        }
-        else if (message.starts_with(denon_cmd::chanvol_C_prefix)) {
-            return (SyncInDb(message, denon_cmd::chanvol_C_prefix, "C offset", 
-                    reported_.chanvol.C));
-        }
-        else if (message.starts_with(denon_cmd::chanvol_SW_prefix)) {
-            return (SyncInDb(message, denon_cmd::chanvol_SW_prefix, "SW offset", 
-                    reported_.chanvol.SW));
-        }
-        else if (message.starts_with(denon_cmd::chanvol_SL_prefix)) {
-            return (SyncInDb(message, denon_cmd::chanvol_SL_prefix, "SL offset", 
-                    reported_.chanvol.SL));
-        }
-        else if (message.starts_with(denon_cmd::chanvol_SR_prefix)) {
-            return (SyncInDb(message, denon_cmd::chanvol_SR_prefix, "SR offset", 
-                    reported_.chanvol.SR));
-        }
-        else {
-            auto p = message.substr(std::string_view(denon_cmd::chanvol_prefix).size());
-            Print(Verbosity::Warning, std::format("Unknown parameter [{}] for channel volume\n", p));
-            return Report_::Unknown;
-        }
+        return SyncInChanvols(message);
     }
     else {
         Print(Verbosity::Debug, std::format("Unrecognised message [{}]\n", message));
+        return Report_::Unknown;
+    }
+}
+
+auto AVRHandler::SyncInChanvols(std::string_view message) -> Report_ {
+    if (message.starts_with(denon_cmd::chanvol_endreport)) {
+        Print(Verbosity::Debug, "Channel volume list complete\n");
+        return Report_::OK;
+    }
+    else if (message.starts_with(denon_cmd::chanvol_FL_prefix)) {
+        return (SyncInDb(message, denon_cmd::chanvol_FL_prefix, "FL offset", 
+                reported_.chanvol.FL));
+    }
+    else if (message.starts_with(denon_cmd::chanvol_FR_prefix)) {
+        return (SyncInDb(message, denon_cmd::chanvol_FR_prefix, "FR offset", 
+                reported_.chanvol.FR));
+    }
+    else if (message.starts_with(denon_cmd::chanvol_C_prefix)) {
+        return (SyncInDb(message, denon_cmd::chanvol_C_prefix, "C offset", 
+                reported_.chanvol.C));
+    }
+    else if (message.starts_with(denon_cmd::chanvol_SW_prefix)) {
+        return (SyncInDb(message, denon_cmd::chanvol_SW_prefix, "SW offset", 
+                reported_.chanvol.SW));
+    }
+    else if (message.starts_with(denon_cmd::chanvol_SL_prefix)) {
+        return (SyncInDb(message, denon_cmd::chanvol_SL_prefix, "SL offset", 
+                reported_.chanvol.SL));
+    }
+    else if (message.starts_with(denon_cmd::chanvol_SR_prefix)) {
+        return (SyncInDb(message, denon_cmd::chanvol_SR_prefix, "SR offset", 
+                reported_.chanvol.SR));
+    }
+    else {
+        auto p = message.substr(std::string_view(denon_cmd::chanvol_prefix).size());
+        Print(Verbosity::Warning, std::format("Unknown parameter [{}] for channel volume\n", p));
         return Report_::Unknown;
     }
 }
@@ -558,17 +627,51 @@ auto AVRHandler::SyncOut() -> Report_ {
     }
     else if (commanded_.volume != requested_.volume) {
         control_mode_ = ControlMode_::Request;
-        response = Send(MakeCommand(denon_cmd::volume_prefix, requested_.volume));
-        if (response == Report_::OK) {
-            commanded_.volume = requested_.volume;
-        }
+        response = SyncOutDb(denon_cmd::volume_prefix, requested_.volume, commanded_.volume);
     }
-    else if (commanded_.maxvolume != requested_.maxvolume) {
-        Print(Verbosity::Warning, "Max volume implementation missing!");
+    else if (commanded_.chanvol != requested_.chanvol) {
+        control_mode_ = ControlMode_::Request;
+        response = SyncOutChanvols();
+    }
+    else {
+        Print(Verbosity::Warning, "Attempted to Sync out a parameter that cannot be commanded!\n");
         response = Report_::BadInput;
     }
     PrintStates(Verbosity::Debug);
     if (response == Report_::OK) response_deadline_.Set();
+    return response;
+}
+
+auto AVRHandler::SyncOutChanvols() -> Report_ {
+    Report_ response = Report_::Unknown;
+    DenonState::ChanVol& commanded = commanded_.chanvol;
+    DenonState::ChanVol& requested = requested_.chanvol;
+    if (commanded.FL != requested.FL) {
+        response = SyncOutDb(denon_cmd::chanvol_FL_prefix, requested.FL, commanded.FL);
+    }
+    else if (commanded.FR != requested.FR) {
+        response = SyncOutDb(denon_cmd::chanvol_FR_prefix, requested.FR, commanded.FR);
+    }
+    else if (commanded.C != requested.C) {
+        response = SyncOutDb(denon_cmd::chanvol_C_prefix, requested.C, commanded.C);
+    }
+    else if (commanded.SL != requested.SL) {
+        response = SyncOutDb(denon_cmd::chanvol_SL_prefix, requested.SL, commanded.SL);
+    }
+    else if (commanded.SR != requested.SR) {
+        response = SyncOutDb(denon_cmd::chanvol_SR_prefix, requested.SR, commanded.SR);
+    }
+    else if (commanded.SW != requested.SW) {
+        response = SyncOutDb(denon_cmd::chanvol_SW_prefix, requested.SW, commanded.SW);
+    }
+    return response;
+}
+
+auto AVRHandler::SyncOutDb(const std::string& prefix, int value, int& slot) -> Report_ {
+    Report_ response = Send(MakeCommand(prefix, value));
+    if (response == Report_::OK) {
+        slot = value;
+    }
     return response;
 }
 
