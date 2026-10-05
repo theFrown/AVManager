@@ -57,7 +57,7 @@ struct DenonState {
 
 class AVRHandler {
 public:
-    AVRHandler(Verbosity verbosity = Verbosity::Info);
+    explicit AVRHandler(Verbosity verbosity = Verbosity::Info);
     ~AVRHandler();
     AVRHandler(const AVRHandler&) = delete;
     AVRHandler(AVRHandler&&) = delete;
@@ -88,15 +88,15 @@ private:
     constexpr static int port_ = 23;
     constexpr static size_t inbufferlen_ = 270; //2x denon message max size (135 chars)
     constexpr static int heartbeat_interval_ = 1000;
-    constexpr static int min_volume = -800; //in 0.1db
-    constexpr static int min_chanvol = -120;
-    constexpr static int max_chanvol = 120;
-    constexpr static int max_volume_increase_steps = 10; //large volume jumps hurt ears and speakers
+    constexpr static int min_volume_ = -800; //in 0.1db
+    constexpr static int min_chanvol_ = -120;
+    constexpr static int max_chanvol_ = 120;
+    constexpr static int max_volume_increase_steps_ = 10; //large volume jumps hurt ears/speakers
     constexpr static int key_sync_warn_delay_ = 100; //below is probably hard to notice in practice
     constexpr static int key_sync_error_delay_ = static_cast<int>(1.1 * heartbeat_interval_);
     int volume_step_ = 5; //the only one that can be changed in the denon
     Timer command_cooldown_{50};
-    Timer response_deadline_{200}; //default should be longer than command_cooldown_'s!
+    Timer response_deadline_{200};
     
     std::array<char, inbufferlen_ + 1> inbuffer_ = {};
     std::string inchain_;

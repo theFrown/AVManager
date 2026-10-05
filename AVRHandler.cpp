@@ -47,15 +47,15 @@ AVRHandler::~AVRHandler() {
             while (listening) {
                 coms_response = ControlReceive(*kill_deadline.GetRemaining());
                 if (coms_response == Report_::Disconnected) {
-                    Print("Connection shutdown confirmed");
+                    Print("Connection shutdown confirmed\n");
                     listening = false;
                 }
                 else if (coms_response == Report_::SocketError) {
-                    Print("Connection error, forcing shutdown"); 
+                    Print("Connection error, forcing shutdown\n"); 
                     listening = false;
                 }
                 if (kill_deadline.IsExpired()) {
-                    Print("Connection timed out, forcing shutdown");
+                    Print("Connection timed out, forcing shutdown\n");
                     listening = false;
                 }
             }
@@ -65,7 +65,7 @@ AVRHandler::~AVRHandler() {
                 response = WSAGetLastError();
             }
             Print(Verbosity::Warning, std::format("Socket shutdown failed with error: {}\n"
-                                                  "    proceding with hard shutdown\n", response));
+                                                  "    proceeding with hard shutdown\n", response));
             linger value{.l_onoff = 1, .l_linger = 0};
             const char* value_byteaddress = reinterpret_cast<const char*>(&value);
             setsockopt(socket_, SOL_SOCKET, SO_LINGER, value_byteaddress, sizeof(value));
@@ -116,55 +116,56 @@ auto AVRHandler::ControlLoop() -> ExitCode {
                     test_sw.Print();
                     Print("\n------------volume up to -26db------------\n\n");
                     requested_.volume = -260;
-                    // control_mode_ = ControlMode_::Request;
                     test_deadline.Set(2500);
                     break;
                 case 2:
                     Print("\n------------volume down to -31db------------\n\n");
                     requested_.volume = -310;
-                    // control_mode_ = ControlMode_::Request;
                     test_deadline.Set(2500);
                     break;
                 case 3:
-                    Print("\n------------5 second normal loop---------------\n\n");
+                    Print("\n------------Sending command to interject (1)---------\n\n");
                     test_sw.Start(true);
-                    test_deadline.Set(5000);
+                    test_deadline.Set(1000);
+                    requested_.mute = "ON";
                     break;
                 case 4:
                     test_sw.Print();
-                    Print("\n------------5 second stalled loop-----------\n\n");
+                    Print("\n------------interjecting read-only status after ~1000ms-----------\n\n");
+                    inchain_.append("MSMATRIX|");
                     test_sw.Start(true);
-                    test_deadline.Set(5000);
-                    test_deadline.Wait();
+                    test_deadline.Set(1500);
                     break;
                 case 5:
                     test_sw.Print();
-                    Print("\n------------second keyboardhook 5 second loop-----------\n\n");
-                    test_key_listener.emplace();
+                    Print("\n------------Sending command to interject (2)---------\n\n");
                     test_sw.Start(true);
-                    test_deadline.Set(5000);
+                    test_deadline.Set(100);
+                    requested_.mute = "OFF";
                     break;
                 case 6:
                     test_sw.Print();
-                    Print("\n------------second keyboardhook destroyed 5 second loop--------\n\n");
-                    test_key_listener.reset();
+                    Print("\n------------interjecting read-only status after ~100ms-----------\n\n");
+                    inchain_.append("MVMAX 84|");
                     test_sw.Start(true);
-                    test_deadline.Set(5000);
+                    test_deadline.Set(2400);
                     break;
                 case 7:
                     test_sw.Print();
-                    Print("\n------------injecting fake thread ID--------\n\n");
-                    test_worker = std::thread(&KeyboardHook::KeyListener::ThreadIdSwapper);
-                    test_deadline.Set(5000);
+                    Print("\n------------Sending command to interject (3)---------\n\n");
+                    test_sw.Start(true);
+                    test_deadline.Set(10);
+                    requested_.mute = "ON";
                     break;
                 case 8:
-                    test_sw.Start(true);
-                    test_worker.join();
                     test_sw.Print();
-                    Print("\n------------check if keys work at normal rate again\n\n");
-                    test_deadline.Set(5000);
+                    Print("\n------------interjecting read-only status after ~10ms-----------\n\n");
+                    inchain_.append("PWSTANDBY|");
+                    test_sw.Start(true);
+                    test_deadline.Set(2490);
                     break;
                 default:
+                    test_sw.Print();
                     Print("\n------------end of test-----------\n\n");
                     Send(MakeCommand(denon_cmd::volume_prefix, test_backup_volume));
                     stayalive = false;
@@ -187,16 +188,9 @@ auto AVRHandler::ControlLoop() -> ExitCode {
         }
 
         //sending: making sure commanded_ is up-to-date through SyncOut
-        if (!command_cooldown_.IsPending()) {
-            if (commanded_ != requested_) {
-                response = SyncOut();
-                if (response != Report_::OK) {
-                    return ExitCode::Send;
-                }
-            }
-            else {
-                command_cooldown_.Reset(); //cheaper to always run than checking if it was set
-            }
+        response = SyncOut();
+        if ((response == Report_::SocketError) || (response == Report_::BadInput)) {
+            return ExitCode::Send;
         }
 
         //closing the loop: making sure commanded_ and reported_ reconcile
@@ -211,10 +205,10 @@ auto AVRHandler::ControlLoop() -> ExitCode {
         }
 
         //sleeping until earliest event or nearest deadline
-        std::optional<int> deadline = command_cooldown_.GetRemaining();
-        if (!deadline.has_value()) deadline = response_deadline_.GetRemaining();
-        if (!deadline.has_value()) deadline = heartbeat_interval_;
-        ControlSleep(*deadline);
+        int deadline0 = test_deadline.GetRemaining().value_or(heartbeat_interval_);
+        int deadline1 = command_cooldown_.GetRemaining().value_or(heartbeat_interval_);
+        int deadline2 = response_deadline_.GetRemaining().value_or(heartbeat_interval_);
+        ControlSleep(std::min({deadline0, deadline1, deadline2, heartbeat_interval_}));
     }
     return ExitCode::Normal;
 }
@@ -231,9 +225,6 @@ auto AVRHandler::ControlPing(bool silent, bool block, int time_out) -> Report_ {
     Print(Verbosity::Debug, "Testing coms channel\n");
     signal_ = denon_cmd::power_prefix;
     signal_received_ = false;
-    if (control_mode_ == ControlMode_::Rest) {
-        control_mode_ = ControlMode_::Report;
-    }
     Report_ response = Send(denon_cmd::power_status, block);
     Timer deadline;
     if ((!block) || (response != Report_::OK)) {
@@ -241,12 +232,12 @@ auto AVRHandler::ControlPing(bool silent, bool block, int time_out) -> Report_ {
     }
     else {
         if (time_out > 0) {
-            Print(Verbosity::Debug, std::format("Waiting until we receive expected response (up to " 
+            Print(Verbosity::Debug, std::format("Waiting until we receive expected response (up to "
                                                 "{} ms)\n", time_out));
             deadline.Set(time_out);
         }
         else {
-            Print(Verbosity::Debug, "Waiting until we receive expected respone\n");
+            Print(Verbosity::Debug, "Waiting until we receive expected response\n");
         }
         while (!signal_received_) {
             if (deadline.IsExpired()) {
@@ -342,11 +333,12 @@ auto AVRHandler::ControlResync() -> Report_ {
             }
         }
         if (!succeeded) {
-            Print(Verbosity::Warning, std::format("Resync failed, exceeded retry attempts for stage {}\n", stage));
+            Print(Verbosity::Warning, std::format("Resync failed, exceeded retry attempts for stage"
+                                                  " {}\n", stage));
             return Report_::Unknown; //TODO: see if it's worth adding a 'timeout' return value
         }
     }
-    Print(Verbosity::Info, "Full resync succesful, state parameters now:\n");
+    Print(Verbosity::Info, "Full resync successful, state parameters now:\n");
     PrintStates(Verbosity::Info);
     return Report_::OK;
 }
@@ -358,7 +350,7 @@ auto AVRHandler::ControlReceive(int time_out_ms) -> Report_ {
     Report_ response = Receive();
     if ((response == Report_::SocketError) || (response == Report_::Disconnected)) return response;
     if (inchain_.empty()) return response; //draining inchain_ is more important than transparency
-    while ((response = Parse()) != Report_::NoData) { //effectively: if there's something in inchain_ worth parsing
+    while ((response = Parse()) != Report_::NoData) { //i.e. inchain_ holds something worth parsing
         if (!inmessage_.empty()) {
           response = SyncIn();
           if (inchain_.empty() && response != Report_::OK) return response;
@@ -391,7 +383,7 @@ auto AVRHandler::ControlSleep(int ms) -> Waker_ { //TODO: consider intentionally
             Print(Verbosity::Trace, "Woken by time-out\n");
             return Waker_::TimeOut;
         case WAIT_FAILED: {
-            int error = GetLastError();
+            DWORD error = GetLastError();
             Print(Verbosity::Error, std::format("Sleep function failed with error {}\n", error));
             return Waker_::Failed;
         }
@@ -469,15 +461,15 @@ int AVRHandler::SyncKeys(KeyStates& keys) {
     }
 
     steps = keys.vup.bare.counter.exchange(0) - keys.vdown.bare.counter.exchange(0);
-    if (steps > max_volume_increase_steps) steps = max_volume_increase_steps;
-    requests += SyncVolumeKey(steps, requested_.volume, min_volume, reported_.maxvolume);
+    if (steps > max_volume_increase_steps_) steps = max_volume_increase_steps_;
+    requests += SyncVolumeKey(steps, requested_.volume, min_volume_, reported_.maxvolume);
 
     steps = keys.vup.ctrl.counter.exchange(0) - keys.vdown.ctrl.counter.exchange(0);
-    requests += SyncVolumeKey(steps, requested_.chanvol.C, min_chanvol, max_chanvol);
+    requests += SyncVolumeKey(steps, requested_.chanvol.C, min_chanvol_, max_chanvol_);
 
     steps = keys.vup.alt.counter.exchange(0) - keys.vdown.alt.counter.exchange(0);
-    requests += SyncVolumeKey(steps, requested_.chanvol.SL, min_chanvol, max_chanvol);
-    requests += SyncVolumeKey(steps, requested_.chanvol.SR, min_chanvol, max_chanvol);
+    requests += SyncVolumeKey(steps, requested_.chanvol.SL, min_chanvol_, max_chanvol_);
+    requests += SyncVolumeKey(steps, requested_.chanvol.SR, min_chanvol_, max_chanvol_);
     
     return requests;
 }
@@ -540,28 +532,22 @@ auto AVRHandler::SyncInChanvols(std::string_view message) -> Report_ {
         return Report_::OK;
     }
     else if (message.starts_with(denon_cmd::chanvol_FL_prefix)) {
-        return (SyncInDb(message, denon_cmd::chanvol_FL_prefix, "FL offset", 
-                reported_.chanvol.FL));
+        return (SyncInDb(message, denon_cmd::chanvol_FL_prefix, "FL offset", reported_.chanvol.FL));
     }
     else if (message.starts_with(denon_cmd::chanvol_FR_prefix)) {
-        return (SyncInDb(message, denon_cmd::chanvol_FR_prefix, "FR offset", 
-                reported_.chanvol.FR));
+        return (SyncInDb(message, denon_cmd::chanvol_FR_prefix, "FR offset", reported_.chanvol.FR));
     }
     else if (message.starts_with(denon_cmd::chanvol_C_prefix)) {
-        return (SyncInDb(message, denon_cmd::chanvol_C_prefix, "C offset", 
-                reported_.chanvol.C));
+        return (SyncInDb(message, denon_cmd::chanvol_C_prefix, "C offset", reported_.chanvol.C));
     }
     else if (message.starts_with(denon_cmd::chanvol_SW_prefix)) {
-        return (SyncInDb(message, denon_cmd::chanvol_SW_prefix, "SW offset", 
-                reported_.chanvol.SW));
+        return (SyncInDb(message, denon_cmd::chanvol_SW_prefix, "SW offset", reported_.chanvol.SW));
     }
     else if (message.starts_with(denon_cmd::chanvol_SL_prefix)) {
-        return (SyncInDb(message, denon_cmd::chanvol_SL_prefix, "SL offset", 
-                reported_.chanvol.SL));
+        return (SyncInDb(message, denon_cmd::chanvol_SL_prefix, "SL offset", reported_.chanvol.SL));
     }
     else if (message.starts_with(denon_cmd::chanvol_SR_prefix)) {
-        return (SyncInDb(message, denon_cmd::chanvol_SR_prefix, "SR offset", 
-                reported_.chanvol.SR));
+        return (SyncInDb(message, denon_cmd::chanvol_SR_prefix, "SR offset", reported_.chanvol.SR));
     }
     else {
         auto p = message.substr(std::string_view(denon_cmd::chanvol_prefix).size());
@@ -617,6 +603,9 @@ auto AVRHandler::SyncInDb(std::string_view message, std::string_view prefix,
 }
 
 auto AVRHandler::SyncOut() -> Report_ {
+    if (command_cooldown_.IsPending()) return Report_::Wait;
+    command_cooldown_.Reset(); //cheaper to always run than checking if it was set
+    if (commanded_ == requested_) return Report_::NoData;
     Report_ response = Report_::Unknown;
     if (commanded_.mute != requested_.mute) {
         control_mode_ = ControlMode_::Request;
@@ -634,8 +623,19 @@ auto AVRHandler::SyncOut() -> Report_ {
         response = SyncOutChanvols();
     }
     else {
-        Print(Verbosity::Warning, "Attempted to Sync out a parameter that cannot be commanded!\n");
-        response = Report_::BadInput;
+        requested_.power = commanded_.power = reported_.power;
+        requested_.input = commanded_.input = reported_.input;
+        requested_.surround = commanded_.surround = reported_.surround;
+        requested_.maxvolume = commanded_.maxvolume = reported_.maxvolume;
+        if (commanded_ != requested_) {
+            Print(Verbosity::Error, "SyncOut stuck on a parameter that cannot be commanded!\n");
+            return Report_::BadInput;
+        }
+        else {
+            Print(Verbosity::Warning, "SyncOut had to force-correct desynced read-only states!\n");
+            PrintStates(Verbosity::Debug);
+            return Report_::OK;
+        }
     }
     PrintStates(Verbosity::Debug);
     if (response == Report_::OK) response_deadline_.Set();
@@ -683,7 +683,7 @@ auto AVRHandler::SyncResolve() -> Report_ {
         else {
             if (reported_ == requested_) {
                 if (commanded_ == requested_) {
-                    Print(Verbosity::Info, "All Commands succesfully sent and confirmed\n");
+                    Print(Verbosity::Info, "All Commands successfully sent and confirmed\n");
                 }
                 else { //current loop design should make this impossible
                     Print(Verbosity::Info, "Reported state matches requested state, despite pending"
@@ -705,8 +705,8 @@ auto AVRHandler::SyncResolve() -> Report_ {
                     return Report_::Unknown;
                 }
                 else {
-                    Print(Verbosity::Warning, "One or more commands have not been correctly reported "
-                                              "back\n    Resending any unconfirmed commands.\n");
+                    Print(Verbosity::Warning, "SyncResolve found one or more parameters in an "
+                                              "unexpected state!\n    Forcing SyncOut to resolve.\n");
                     commanded_ = reported_;  //forces desync between requested_ and commanded_
                     PrintStates(Verbosity::Debug);
                     return Report_::Data;
@@ -716,11 +716,11 @@ auto AVRHandler::SyncResolve() -> Report_ {
     }
     else {
         if (control_mode_ == ControlMode_::Report) {
-            Print(Verbosity::Info, "State succesfully updated by AVR-originated change\n");
+            Print(Verbosity::Info, "State successfully updated by AVR-originated change\n");
         }
         else {
             Print(Verbosity::Warning, "SyncResolve called for unknown reasons,\n"
-                                      "    harmonizig all states to reported state\n");
+                                      "    harmonizing all states to reported state\n");
         }
         commanded_ = requested_ = reported_;
         failed_syncs_ = 0;
@@ -802,7 +802,8 @@ auto AVRHandler::Receive() -> Report_ {
     if (event_healthy_) {
         if (!WSAResetEvent(socket_event_)) {
             response = WSAGetLastError();
-            Print(Verbosity::Error, std::format("Resetting socket event failed with error: {}\n", response));
+            Print(Verbosity::Error, std::format("Resetting socket event failed with error: {}\n", 
+                                                response));
             event_healthy_ = false;
         }
     }
@@ -814,8 +815,8 @@ auto AVRHandler::Receive() -> Report_ {
             return Report_::NoData;
         }
         else {
-            Print(Verbosity::Warning, std::format("Failed to retreive response from AVR with error: {}\n",
-                                                response));
+            Print(Verbosity::Warning, std::format("Failed to retrieve response from AVR with error:"
+                                                  " {}\n", response));
             connection_healthy_ = false;
             return Report_::SocketError;
         }
@@ -846,7 +847,7 @@ auto AVRHandler::Receive() -> Report_ {
 
 auto AVRHandler::Parse() -> Report_ {
     if (!inmessage_.empty()) {
-        Print(Verbosity::Warning, "Tried to parse new message before previous was processed");
+        Print(Verbosity::Warning, "Tried to parse new message before previous was processed\n");
         return Report_::Wait;
     }
     if (inchain_.empty()) {
@@ -992,7 +993,7 @@ void AVRHandler::PrintStates(Verbosity level) {
                              requested_.input.substr(0, w1), w1, commanded_.input.substr(0, w1), w1,
                              reported_.input.substr(0, w1), w1);
     std::cout << std::format("surround mode: | {: >{}} | {: >{}} | {: >{}}\n",
-                             requested_.surround.substr(0, w1), w1, commanded_.surround.substr(0, w1), 
+                             requested_.surround.substr(0, w1), w1, commanded_.surround.substr(0, w1),
                              w1, reported_.surround.substr(0, w1), w1);
     std::cout << std::format("mute:          | {: >{}} | {: >{}} | {: >{}}\n", 
                              requested_.mute.substr(0, w1), w1, commanded_.mute.substr(0, w1), w1,
@@ -1008,7 +1009,7 @@ void AVRHandler::PrintStates(Verbosity level) {
     std::cout << std::format("chanvol C:     | {} | {} | {}\n", PrintDb(requested_.chanvol.C, w2), 
                              PrintDb(commanded_.chanvol.C, w2), PrintDb(reported_.chanvol.C, w2));
     std::cout << std::format("chanvol SW:    | {} | {} | {}\n", PrintDb(requested_.chanvol.SW, w2),
-                             PrintDb(commanded_.chanvol.SW, w2), PrintDb(reported_.chanvol.SW, w2)); 
+                             PrintDb(commanded_.chanvol.SW, w2), PrintDb(reported_.chanvol.SW, w2));
     std::cout << std::format("chanvol SL:    | {} | {} | {}\n", PrintDb(requested_.chanvol.SL, w2), 
                              PrintDb(commanded_.chanvol.SL, w2), PrintDb(reported_.chanvol.SL, w2));
     std::cout << std::format("chanvol SR:    | {} | {} | {}\n", PrintDb(requested_.chanvol.SR, w2), 

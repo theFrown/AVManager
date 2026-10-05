@@ -31,8 +31,7 @@ public:
         if (!IsSet()) return std::nullopt;
         auto remaining = *deadline_ - Clock_::now();
         int remaining_ms = static_cast<int>(std::chrono::ceil<MilliSeconds_>(remaining).count());
-        if (remaining_ms > 0) return remaining_ms;
-        else return 0;
+        return ((remaining_ms > 0) ? remaining_ms : 0);
     }
 };
 

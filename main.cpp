@@ -43,7 +43,7 @@ int main() {
         std::cout << "yay, good loop\n";
     }
     else {
-        std::cout << "boo, loop error:\n" << response << "\n";
+        std::cout << "boo, loop error:\n" << static_cast<int>(exitcode) << "\n";
         return 3;
     }   
     return 0;

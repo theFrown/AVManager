@@ -6,7 +6,7 @@ Where the project is going and why. Working document: it is updated as decisions
 
 - Every item has a **permanent number**. Numbers are never reused or renumbered, even when
   an item is finished, dropped or moved to another stage. New items take the next free
-  number, whichever stage they land in. **Next free number: 45.**
+  number, whichever stage they land in. **Next free number: 47.**
 - Tags say what kind of work an item is: `feature`, `bug`, `refactor`, `test`, `infra`,
   `docs`, `decision` (a question to settle before building), `investigate`.
 - Status: ⬜ open · 🚧 in progress · ✅ done · ✖ dropped. Finished items stay where they are.
@@ -44,11 +44,11 @@ Where the project is going and why. Working document: it is updated as decisions
   and tests against the real receiver run locally before merging. Untested work lives on a
   short-lived branch.
 
-**Current focus:** closing Stage 1 with a clean-up (items 11, 24), then a first CI pass
+**Current focus:** a first CI pass
 (items 13–15) so the Stage 3 split happens with tests underneath. Items 16 and 17 follow
 the split.
 
-**Open strategic questions:** items 11, 19, 25.
+**Open strategic questions:** items 19, 25.
 
 ---
 
@@ -74,15 +74,23 @@ The event-driven control loop is rebuilt only as far as this needs.
 - **8** · ✅ · `feature` — `main` runs the keyboard hook and the control loop together.
 - **9** · ✅ · `bug` — `SyncOut` has no channel-volume branch, so Ctrl or Alt + volume ends
   the control loop.
-- **11** · ⬜ · `decision` — The Ctrl+Alt+End quit shortcut in the hook callback: keep, remap
+- **11** · ✅ · `decision` — The Ctrl+Alt+End quit shortcut in the hook callback: keep, remap
   or remove. (With the hook on its own thread it stops the hook, not the program.)
-- **24** · 🚧 · `refactor` — Clean-up, limited to what survives the Stage 3 split:
-  `explicit` on `AVRHandler`'s single-argument constructor; consistent member naming
-  (trailing `_` on the new private constants; `stayalive` is public and writable);
-  consistent reset defaults between `KeyboardHook::GetError` and `Stopwatch::Read`.
-  Done: `explicit` on `Timer` and `Stopwatch`, both in `timing.h`; construction failure is
-  reported through a status member with a getter for now (setup moves into the receiver
-  link's startup in Stage 3).
+  Decided: keep it as it is for now; once `main` has a proper shutdown (item 43) it starts
+  a real quit; once the tray icon exists (item 45) it is removed or becomes a tray option.
+- **46** · ✅ · `bug` — A receiver-side change to a setting we never command (e.g. the
+  surround mode switching when a video starts) during a pending request ends the control
+  loop: the retry copies the reported state into the commanded one, and `SyncOut` finds a
+  difference it can't send. Fixed: `SyncOut` brings settings we never command in line with
+  the receiver; a difference it still can't send is an error. Reproduced and verified by
+  injecting a surround-mode report during a pending request. Known side effect: such a
+  change is first counted as one failed sync (one retry warning) before it is resolved.
+- **24** · ✅ · `refactor` — Clean-up, limited to what survives the Stage 3 split:
+  `explicit` single-argument constructors (`AVRHandler`, `Timer`, `Stopwatch`); consistent
+  member naming; `SyncOut` checks for work itself instead of relying on its caller; the
+  loop sleeps until the earliest pending timer, capped by the heartbeat; log typos and
+  formatting. Construction failure is reported through a status member with a getter for
+  now (setup moves into the receiver link's startup in Stage 3).
 
 ## Stage 2 — Public release and CI
 
@@ -108,7 +116,10 @@ goes on the side whose other half can be faked.
 
 - **19** · ⬜ · `decision` — Division of responsibilities between the receiver link and the
   controller. Current lean: the link owns everything the receiver reports (a live mirror of
-  device state, including the ping); the controller owns only intent.
+  device state, including the ping); the controller owns only intent. Settings we have no
+  intent for (power, input, surround mode, max volume) simply follow what the receiver
+  reports; after the split the controller applies that rule when it reads the link, and
+  the link never writes controller state.
 - **20** · ⬜ · `refactor` — Put the link behind an interface, with the real implementation
   and a fake.
 - **21** · ⬜ · `test` — Receiver simulator: a local TCP server that speaks the protocol,
@@ -122,9 +133,9 @@ goes on the side whose other half can be faked.
   comparison against the control mode when adding it. Today only startup resyncs from Rest
   (discard keys pressed meanwhile, then settle); this becomes necessary once reconnect
   (item 30) or periodic resyncs exist.
-- **6** · ⬜ · `refactor` — Remove the Rest→Report workaround in `ControlPing` (no longer
-  needed since item 3) and the Request-setting in `SyncOut` (still relied on by the test
-  scaffolding, see item 23).
+- **6** · 🚧 · `refactor` — Remove the Rest→Report workaround in `ControlPing` (no longer
+  needed since item 3; done) and the Request-setting in `SyncOut` (still relied on by the
+  test scaffolding, see item 23).
 
 ## Stage 4 — Threading and robustness
 
@@ -162,12 +173,17 @@ goes on the side whose other half can be faked.
 - **43** · ⬜ · `decision` — Design `main` properly: startup order, supervising and
   restarting the control loop after a failure while the hook keeps running, and shutdown.
   Includes which failures should end the loop at all (e.g. an excessive key-processing
-  delay currently does). Ties in with items 25, 26 and 30.
+  delay currently does). Ties in with items 25, 26 and 30. Once shutdown exists, the
+  Ctrl+Alt+End shortcut starts a real quit (item 11).
 
 ## Stage 5 — Further features
 
 - **34** · ⬜ · `feature` — On-screen volume display over windowed and borderless-fullscreen
   apps.
+- **45** · ⬜ · `feature` — Tray icon with a small menu for actions and settings, starting
+  with Quit. Needs a window and a thread pumping its messages (shared with item 34),
+  messages that carry meaning to the control loop, and ordered shutdown: depends on items
+  25, 26 and 43. Replaces the Ctrl+Alt+End shortcut, or offers it as a toggle (item 11).
 - **35** · ⬜ · `feature` — Hold acceleration: a middleware thread between hook and
   controller that turns held keys into larger steps. Also decides what holding mute does
   (today every auto-repeat counts as a separate press).
