@@ -6,7 +6,7 @@ Where the project is going and why. Working document: it is updated as decisions
 
 - Every item has a **permanent number**. Numbers are never reused or renumbered, even when
   an item is finished, dropped or moved to another stage. New items take the next free
-  number, whichever stage they land in. **Next free number: 47.**
+  number, whichever stage they land in. **Next free number: 48.**
 - Tags say what kind of work an item is: `feature`, `bug`, `refactor`, `test`, `infra`,
   `docs`, `decision` (a question to settle before building), `investigate`.
 - Status: ⬜ open · 🚧 in progress · ✅ done · ✖ dropped. Finished items stay where they are.
@@ -76,8 +76,9 @@ The event-driven control loop is rebuilt only as far as this needs.
   the control loop.
 - **11** · ✅ · `decision` — The Ctrl+Alt+End quit shortcut in the hook callback: keep, remap
   or remove. (With the hook on its own thread it stops the hook, not the program.)
-  Decided: keep it as it is for now; once `main` has a proper shutdown (item 43) it starts
-  a real quit; once the tray icon exists (item 45) it is removed or becomes a tray option.
+  Decided: it now quits the program cleanly (the control loop exits, the hook stops, the
+  connection closes); once the tray icon exists (item 45) it is removed or becomes a tray
+  option.
 - **46** · ✅ · `bug` — A receiver-side change to a setting we never command (e.g. the
   surround mode switching when a video starts) during a pending request ends the control
   loop: the retry copies the reported state into the commanded one, and `SyncOut` finds a
@@ -95,7 +96,8 @@ The event-driven control loop is rebuilt only as far as this needs.
 ## Stage 2 — Public release and CI
 
 - **12** · 🚧 · `docs` — README: purpose, status, how to build, architecture overview, link
-  to Denon's official control protocol document.
+  to Denon's official control protocol document. `main` no longer runs test scaffolding,
+  so build instructions are now possible.
 - **13** · ⬜ · `test` — GoogleTest via CMake `FetchContent`, registered with CTest. Port the
   existing dB-conversion test to it.
 - **14** · ⬜ · `test` — Unit tests for the other pure functions: `StringToDb`, `MakeCommand`,
@@ -103,7 +105,10 @@ The event-driven control loop is rebuilt only as far as this needs.
 - **15** · ⬜ · `infra` — GitHub Actions: build and run tests on `windows-latest` on every
   push.
 - **16** · ⬜ · `infra` — Build a release executable on version tags and attach it to a
-  GitHub Release.
+  GitHub Release. Before it is useful to anyone else: a configurable receiver address
+  (currently hard-coded), the C runtime linked statically so no redistributable is needed,
+  and a note on expected SmartScreen / antivirus warnings for an unsigned program with a
+  global keyboard hook.
 - **17** · ⬜ · `investigate` — Can GitHub's hosted Windows runners run tests that need a
   low-level keyboard hook and `SendInput`?
 - **18** · ✅ · `decision` — When to make the repository public. Public since October 2026.
@@ -127,15 +132,17 @@ goes on the side whose other half can be faked.
   disconnects, garbage). When the real receiver disagrees with it, fix the simulator first.
 - **22** · ⬜ · `test` — Controller tests against the fake and the simulator: state
   transitions, retry, escalation to resync.
-- **23** · ⬜ · `refactor` — Move the test scaffolding out of `ControlLoop`.
+- **23** · ✅ · `refactor` — Move the test scaffolding out of `ControlLoop`. Removed; the
+  manual test stages (volume moves, injected receiver reports) last existed in commit
+  `dea5137` and are the starting point for items 21 and 22.
 - **4** · ⬜ · `feature` — Resync as its own control mode. Entered from Rest it settles all
   three states itself on exit; entered from Request it returns to Request. Audit every
   comparison against the control mode when adding it. Today only startup resyncs from Rest
   (discard keys pressed meanwhile, then settle); this becomes necessary once reconnect
   (item 30) or periodic resyncs exist.
 - **6** · 🚧 · `refactor` — Remove the Rest→Report workaround in `ControlPing` (no longer
-  needed since item 3; done) and the Request-setting in `SyncOut` (still relied on by the
-  test scaffolding, see item 23).
+  needed since item 3; done) and the Request-setting in `SyncOut` (no longer needed now
+  that the test scaffolding is gone, item 23).
 
 ## Stage 4 — Threading and robustness
 
@@ -213,6 +220,11 @@ goes on the side whose other half can be faked.
 - **39** · ⬜ · `bug` — The limit beep fires on every clamp: twice for Alt + volume (once per
   surround channel), and on every auto-repeat while a key is held at a limit, which turns
   into a trill. Beep once when a press first reaches the limit.
+- **47** · ⬜ · `feature` — Timestamped logging: one small logger shared by all classes
+  (`KeyboardHook` and some helpers currently write to the console directly), every line
+  prefixed with wall-clock time in milliseconds, each line written in one go so the hook
+  and control threads can't interleave mid-line. Later a log file as an extra target for
+  builds without a console (item 45).
 - **44** · ⬜ · `bug` — Special values in the receiver's replies are parsed as ordinary
   levels: `CVSW 00` means subwoofer off (currently read as −50 dB, outside the channel
   range), and `MV00` means volume off (the receiver displays `---`, not −80 dB).

@@ -20,6 +20,7 @@ struct KeyStates {
     Combos vdown;
     State mute;
     Stopwatch processing_delay{false};
+    std::atomic<bool> quit = false;
 };
 
 class KeyboardHook {
@@ -40,8 +41,7 @@ public:
         bool primary_ = false;
 
     public:
-        KeyListener()
-        {   
+        KeyListener() {   
             MSG msg = {};
             PeekMessage(&msg, NULL, WM_USER, WM_USER, PM_NOREMOVE);
             DWORD expected = 0;
@@ -53,15 +53,6 @@ public:
         KeyListener(KeyListener&&) = delete;
         KeyListener& operator=(const KeyListener&) = delete;
         KeyListener& operator=(KeyListener&&) = delete;
-
-        static void ThreadIdSwapper() {
-            DWORD backup_thread_id = listener_thread_id_.exchange(GetCurrentThreadId());
-            std::cout << "Swapping thread ID and going to sleep for 5 seconds, press keys now:\n";
-            Timer sleep{5000, true};
-            sleep.Wait();
-            listener_thread_id_.store(backup_thread_id);
-            std::cout << "Original thread ID restored\n";
-        }
     };
 
     inline static KeyStates raw_keys = {};
@@ -85,7 +76,7 @@ public:
 
 private:
     constexpr static LRESULT swallow_key_value_ = 1;
-    constexpr static ULONG_PTR ping_key_signature_ = 531764;
+    constexpr static ULONG_PTR ping_key_signature_ = 531764; //free to change
     constexpr static int ping_message_number_ = 1;
     inline static std::atomic<PingStatus> ping_key_status_ = PingStatus::Unknown;
     inline static std::atomic<HookStatus> hook_status_ = HookStatus::Uninitialized;

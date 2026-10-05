@@ -14,8 +14,6 @@
 #include "keyboard.h"
 #include "timing.h"
 
-#include <thread> //remove after debug
-
 AVRHandler::AVRHandler(Verbosity verbosity) 
     : verbosity_(verbosity)
 {   
@@ -80,105 +78,28 @@ AVRHandler::~AVRHandler() {
 
 auto AVRHandler::ControlLoop() -> ExitCode {
     KeyboardHook::KeyListener key_listener;
-    Stopwatch test_sw{true};
     Report_ response = ControlPing(false);
-    test_sw.Print();
     if (response != Report_::OK) {
         return ExitCode::Ping;
     }
-    test_sw.Start(true);
     response = ControlResync();
-    test_sw.Print();
     if (response != Report_::OK) {
         return ExitCode::Sync;
     }
-    SyncKeyHook(true); //flush any keypresses inbound before we were ready
+    response = SyncKeyHook(true); //flush any keypresses inbound before we were ready
+    if (response != Report_::OK) {
+        return ExitCode::Key;
+    }
     SyncResolve(); //synchronize the 3 states
 
-    Timer test_deadline{50, true};
-    int test_stage = 0;
-    // int test_db = -300;
-    int test_backup_volume = reported_.volume;
-    std::optional<KeyboardHook::KeyListener> test_key_listener;
-    std::thread test_worker;
-
     while (stayalive) {
-
-        //test infrastructure below v v
-        if (test_deadline.IsExpired()) {
-            switch (test_stage) {
-                case 0:
-                    Print("\n-------waiting for straggler messages-------\n\n");
-                    test_sw.Start(true);
-                    test_deadline.Set(5000);
-                    break;
-                case 1:
-                    test_sw.Print();
-                    Print("\n------------volume up to -26db------------\n\n");
-                    requested_.volume = -260;
-                    test_deadline.Set(2500);
-                    break;
-                case 2:
-                    Print("\n------------volume down to -31db------------\n\n");
-                    requested_.volume = -310;
-                    test_deadline.Set(2500);
-                    break;
-                case 3:
-                    Print("\n------------Sending command to interject (1)---------\n\n");
-                    test_sw.Start(true);
-                    test_deadline.Set(1000);
-                    requested_.mute = "ON";
-                    break;
-                case 4:
-                    test_sw.Print();
-                    Print("\n------------interjecting read-only status after ~1000ms-----------\n\n");
-                    inchain_.append("MSMATRIX|");
-                    test_sw.Start(true);
-                    test_deadline.Set(1500);
-                    break;
-                case 5:
-                    test_sw.Print();
-                    Print("\n------------Sending command to interject (2)---------\n\n");
-                    test_sw.Start(true);
-                    test_deadline.Set(100);
-                    requested_.mute = "OFF";
-                    break;
-                case 6:
-                    test_sw.Print();
-                    Print("\n------------interjecting read-only status after ~100ms-----------\n\n");
-                    inchain_.append("MVMAX 84|");
-                    test_sw.Start(true);
-                    test_deadline.Set(2400);
-                    break;
-                case 7:
-                    test_sw.Print();
-                    Print("\n------------Sending command to interject (3)---------\n\n");
-                    test_sw.Start(true);
-                    test_deadline.Set(10);
-                    requested_.mute = "ON";
-                    break;
-                case 8:
-                    test_sw.Print();
-                    Print("\n------------interjecting read-only status after ~10ms-----------\n\n");
-                    inchain_.append("PWSTANDBY|");
-                    test_sw.Start(true);
-                    test_deadline.Set(2490);
-                    break;
-                default:
-                    test_sw.Print();
-                    Print("\n------------end of test-----------\n\n");
-                    Send(MakeCommand(denon_cmd::volume_prefix, test_backup_volume));
-                    stayalive = false;
-                    break;
-            }
-            test_stage++;
-        }
-        //test infrastructure above ^ ^
-
         //reading keys: making sure requested_ is up-to-date through SyncKeys
         response = SyncKeyHook();
         if (response == Report_::KeyError) {
             return ExitCode::Key;
+        }
+        else if (response == Report_::Disconnected) {
+            return ExitCode::Commanded;
         }
 
         //receiving: making sure reported_ is up-to-date through SyncIn
@@ -205,10 +126,9 @@ auto AVRHandler::ControlLoop() -> ExitCode {
         }
 
         //sleeping until earliest event or nearest deadline
-        int deadline0 = test_deadline.GetRemaining().value_or(heartbeat_interval_);
         int deadline1 = command_cooldown_.GetRemaining().value_or(heartbeat_interval_);
         int deadline2 = response_deadline_.GetRemaining().value_or(heartbeat_interval_);
-        ControlSleep(std::min({deadline0, deadline1, deadline2, heartbeat_interval_}));
+        ControlSleep(std::min({deadline1, deadline2, heartbeat_interval_}));
     }
     return ExitCode::Normal;
 }
@@ -396,6 +316,10 @@ auto AVRHandler::ControlSleep(int ms) -> Waker_ { //TODO: consider intentionally
 
 auto AVRHandler::SyncKeyHook(bool flush) -> Report_ {
     KeyStates& keys = KeyboardHook::raw_keys;
+    if (keys.quit.exchange(false)) {
+        Print("Shutdown command received\n");
+        return Report_::Disconnected;
+    }
     auto error = KeyboardHook::GetError(true);
     if (error.has_value()) {
         switch (*error) {
@@ -1033,63 +957,4 @@ std::string AVRHandler::PrintDb(int value, int width) {
             return std::format("{:+{}.1f} db", value / 10.0, width);
         }
     }
-}
-
-bool test_dbtostring() {
-    std::pair<int, const char*> MVs[] = {
-        {-10000, "00"},
-        {  -801, "00"},
-        {  -800, "00"},
-        {  -799, "00"},
-        {  -798, "00"},
-        {  -797, "005"},
-        {  -796, "005"},
-        {  -795, "005"},
-        {  -794, "005"},
-        {  -793, "005"},
-        {  -792, "01"},
-        {  -300, "50"},
-        {     0, "80"},
-        {   179, "98"},
-        {   180, "98"},
-        {   181, "98"},
-        {  1000, "98"}
-    };
-    std::pair<int, const char*> CVs[] = {
-        {-10000, "38"},
-        {  -121, "38"},
-        {  -120, "38"},
-        {  -119, "38"},
-        {  -118, "38"},
-        {  -117, "385"},
-        {  -116, "385"},
-        {  -115, "385"},
-        {  -114, "385"},
-        {  -113, "385"},
-        {  -112, "39"},
-        {     0, "50"},
-        {   119, "62"},
-        {   120, "62"},
-        {   121, "62"},
-        {  1000, "62"}
-    };
-    std::string response;
-    for (int i = 0; i < sizeof(MVs)/sizeof(MVs[0]); i++) {
-        response = AVRHandler::DbToString(MVs[i].first);
-        if (response != MVs[i].second) {
-            std::cerr << std::format("[WARNING] failed on MV case {}, input {}, output {}, expected"
-                                     " {}\n",i, MVs[i].first, response, MVs[i].second);
-            return false;
-        }
-    }
-    for (int i = 0; i < sizeof(CVs)/sizeof(CVs[0]); i++) {
-        response = AVRHandler::DbToString(CVs[i].first, 500, 380, 620);
-        if (response != CVs[i].second) {
-            std::cerr << std::format("[WARNING] failed on CV case {}, input {}, output {}, expected"
-                                     " {}\n", i, CVs[i].first, response, CVs[i].second);
-            return false;
-        }
-    }
-    std::cout << "all tests of DbToString passed\n";
-    return true;
 }

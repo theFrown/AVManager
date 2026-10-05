@@ -64,7 +64,7 @@ public:
     AVRHandler& operator=(const AVRHandler&) = delete;
     AVRHandler& operator=(AVRHandler&&) = delete;
 
-    enum class ExitCode { Normal, Ping, Sync, Key, Receive, Send, Resync };
+    enum class ExitCode { Normal, Commanded, Ping, Sync, Key, Receive, Send, Resync };
     enum class CtorCode { Healthy, Unknown, SocketSetupFailed, ConnectionFailed };
 
     bool stayalive = false;

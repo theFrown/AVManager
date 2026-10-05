@@ -156,6 +156,8 @@ LRESULT CALLBACK KeyboardHook::ProcessKeys(int nCode, WPARAM wParam, LPARAM lPar
         switch (key_message.vkCode) {      //phase 2: handle any other key
             case VK_END:  //TODO: consider removing/remapping once everything is stable
                 if (keydown && altdown && ctrldown && !shiftdown) {
+                    raw_keys.quit.store(true);
+                    WakeListener();
                     PostQuitMessage(0);
                 }
                 break;

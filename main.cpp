@@ -10,40 +10,29 @@ int main() {
     #endif
 
     std::cout << "AVManager starting\n";
-    AVRHandler avr{Verbosity::Debug};
+    AVRHandler avr{Verbosity::Info};
     AVRHandler::CtorCode avr_status = avr.GetCtorStatus();
     if (avr_status != AVRHandler::CtorCode::Healthy) {
-        std::cout << "boo, error:\n" << static_cast<int>(avr_status) << "\n";
+        std::cout << "[ERROR] AVRHandler creation failed with error code: ";
+        std::cout << static_cast<int>(avr_status) << "\n";
         return 1;
     }
 
     std::cout << "KeyboardHook starting\n";
-    Timer sleeper;
     KeyboardHook keyhook;
-    keyhook.PrintStates();
     int response = keyhook.Start() ? 0 : 1;
-    if (response == 0) {
-        std::cout << "yay, good keyboardhook\n";
-    }
-    else {
-        std::cout << "boo, keyboardhook error\n";
+    if (response != 0) {
+        std::cout << "KeyboardHook failed to start\n";
         return 2;
     }   
 
-    std::cout << "keypresses before control loop:\n";
-    sleeper.Set(5000);
-    sleeper.Wait(); 
-    std::cout << "\n==============TEST LOOP==============\n\n";
+    std::cout << "Main loop starting\n=============================================\n\n";
     AVRHandler::ExitCode exitcode = avr.ControlLoop();
-    std::cout << "keypresses after control loop:\n";
-    sleeper.Set(5000);
-    sleeper.Wait();
+    std::cout << "\n=============================================\nMain loop ended\n";
     keyhook.Stop();
-    if (exitcode == AVRHandler::ExitCode::Normal) {
-        std::cout << "yay, good loop\n";
-    }
-    else {
-        std::cout << "boo, loop error:\n" << static_cast<int>(exitcode) << "\n";
+    if ((exitcode != AVRHandler::ExitCode::Normal) && (exitcode != AVRHandler::ExitCode::Commanded)) {
+        std::cout << "[ERROR] Main loop ended uncommanded with error:\n";
+        std::cout << static_cast<int>(exitcode) << "\n";
         return 3;
     }   
     return 0;
