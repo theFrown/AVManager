@@ -6,7 +6,7 @@ Where the project is going and why. Working document: it is updated as decisions
 
 - Every item has a **permanent number**. Numbers are never reused or renumbered, even when
   an item is finished, dropped or moved to another stage. New items take the next free
-  number, whichever stage they land in. **Next free number: 48.**
+  number, whichever stage they land in. **Next free number: 55.**
 - Tags say what kind of work an item is: `feature`, `bug`, `refactor`, `test`, `infra`,
   `docs`, `decision` (a question to settle before building), `investigate`.
 - Status: ⬜ open · 🚧 in progress · ✅ done · ✖ dropped. Finished items stay where they are.
@@ -44,15 +44,16 @@ Where the project is going and why. Working document: it is updated as decisions
   and tests against the real receiver run locally before merging. Untested work lives on a
   short-lived branch.
 
-**Current focus:** a first CI pass
-(items 13–15) so the Stage 3 split happens with tests underneath. Items 16 and 17 follow
-the split.
+**Current focus:** Stage 2, top to bottom: routing logging through one `Log` function
+(item 48), build instructions (item 12), then a first CI pass (items 13–17) so the
+Stage 3 split happens with tests underneath; then the rest of logging (items 49–52),
+single instance and running in the background (items 53–54).
 
 **Open strategic questions:** items 19, 25.
 
 ---
 
-## Stage 1 — Keyboard volume control, end to end
+## Stage 1 —✅— Keyboard volume control, end to end
 
 The first milestone that makes the program useful: press a volume key, the receiver moves.
 The event-driven control loop is rebuilt only as far as this needs.
@@ -93,13 +94,27 @@ The event-driven control loop is rebuilt only as far as this needs.
   formatting. Construction failure is reported through a status member with a getter for
   now (setup moves into the receiver link's startup in Stage 3).
 
-## Stage 2 — Public release and CI
+## Stage 2 — Daily use, public release and CI
 
+The program is already useful, so it should run like the background tool it is meant to
+be: no console window, started with Windows, and leaving a record when something goes
+wrong.
+
+- **47** · ✅ · `feature` — A log file per run, named by its UTC start time (nothing is ever
+  overwritten), opened for appending, flushed per line (a crash must not lose the last
+  lines before it), and closed with an explicit end marker, so a file without one marks a
+  run that died.
+- **48** · ⬜ · `feature` — A `Log` function directing prints to the relevant logging streams,
+  owning timestamps and line endings, with `AVRHandler` (through its existing `Print`, which
+  keeps filtering by verbosity for now) and `main` routed through it. Main thread only for now
+  (see item 50).
 - **12** · 🚧 · `docs` — README: purpose, status, how to build, architecture overview, link
   to Denon's official control protocol document. `main` no longer runs test scaffolding,
   so build instructions are now possible.
 - **13** · ⬜ · `test` — GoogleTest via CMake `FetchContent`, registered with CTest. Port the
-  existing dB-conversion test to it.
+  existing dB-conversion test to it. Starts with a pure move commit (no edits): sources
+  into `src/`, file names to snake_case, and the program's code as a library that both the
+  application and the tests link.
 - **14** · ⬜ · `test` — Unit tests for the other pure functions: `StringToDb`, `MakeCommand`,
   `Parse`, `ProcessCombo`.
 - **15** · ⬜ · `infra` — GitHub Actions: build and run tests on `windows-latest` on every
@@ -112,6 +127,23 @@ The event-driven control loop is rebuilt only as far as this needs.
 - **17** · ⬜ · `investigate` — Can GitHub's hosted Windows runners run tests that need a
   low-level keyboard hook and `SendInput`?
 - **18** · ✅ · `decision` — When to make the repository public. Public since October 2026.
+- **49** · ⬜ · `refactor` — Logging interface with verbosity moved from `AVRHandler` into
+  the logger, so it can route by level, and a t.b.d. cohesive handling of value types (string
+  inputs vs a stream-style line object vs format-style arguments).
+- **50** · ⬜ · `feature` — Thread-safe logging: callers hand finished lines to a queue and
+  one writer thread writes them out, so logging never makes a caller wait on the disk
+  (essential for the keyboard hook's callback). Then route `KeyboardHook` through it.
+- **51** · ⬜ · `feature` — A rolling `errors.txt` to be one place to look for problems
+  without reading every log; collecting warnings and errors across runs, each line naming the
+  run's log file.
+- **52** · ⬜ · `feature` — Remove old per-run log files at startup (by age or count), and
+  truncate or split errors.txt by file size or monthly (t.b.d.) to prevent bloat.
+- **53** · ⬜ · `feature` — Single instance with takeover: a second copy (e.g. a development
+  build) asks the running one to quit cleanly and waits for it, instead of both hooking
+  the keyboard and competing for the receiver's connection.
+- **54** · ⬜ · `feature` — Run in the background: build without a console window, start
+  with Windows. Quitting relies on Ctrl+Alt+End (item 11) until the tray icon exists
+  (item 45). Needs items 48 and 53 first.
 
 ## Stage 3 — Split `AVRHandler` along the test seam
 
@@ -134,7 +166,7 @@ goes on the side whose other half can be faked.
   transitions, retry, escalation to resync.
 - **23** · ✅ · `refactor` — Move the test scaffolding out of `ControlLoop`. Removed; the
   manual test stages (volume moves, injected receiver reports) last existed in commit
-  `dea5137` and are the starting point for items 21 and 22.
+  `a683f70` and are the starting point for items 21 and 22.
 - **4** · ⬜ · `feature` — Resync as its own control mode. Entered from Rest it settles all
   three states itself on exit; entered from Request it returns to Request. Audit every
   comparison against the control mode when adding it. Today only startup resyncs from Rest
@@ -220,11 +252,6 @@ goes on the side whose other half can be faked.
 - **39** · ⬜ · `bug` — The limit beep fires on every clamp: twice for Alt + volume (once per
   surround channel), and on every auto-repeat while a key is held at a limit, which turns
   into a trill. Beep once when a press first reaches the limit.
-- **47** · ⬜ · `feature` — Timestamped logging: one small logger shared by all classes
-  (`KeyboardHook` and some helpers currently write to the console directly), every line
-  prefixed with wall-clock time in milliseconds, each line written in one go so the hook
-  and control threads can't interleave mid-line. Later a log file as an extra target for
-  builds without a console (item 45).
 - **44** · ⬜ · `bug` — Special values in the receiver's replies are parsed as ordinary
   levels: `CVSW 00` means subwoofer off (currently read as −50 dB, outside the channel
   range), and `MV00` means volume off (the receiver displays `---`, not −80 dB).

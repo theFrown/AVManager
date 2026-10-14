@@ -88,3 +88,19 @@ public:
         }
     }
 };
+
+class Timestamp {
+private:
+    using Clock_ = std::chrono::system_clock;
+    using MilliSeconds_ = std::chrono::milliseconds;
+    using Seconds_ = std::chrono::seconds;
+    Clock_::time_point time_ = Clock_::now();
+
+public:
+    std::string Prefix() const {
+        return std::format("{0:%F} {0:%T}Z - ", std::chrono::floor<MilliSeconds_>(time_));
+    }
+    std::string File() const {
+        return std::format("{0:%Y%m%d}_{0:%H%M%S}Z", std::chrono::floor<Seconds_>(time_));
+    }
+};
