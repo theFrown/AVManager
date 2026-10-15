@@ -2,7 +2,7 @@
 #include <format>
 #include <thread>
 #include <windows.h> //lean + nomin in CMakeLists
-#include "keyboard.h"
+#include "keyboard_hook.h"
 
 KeyboardHook::~KeyboardHook() {
     if (worker_.joinable()) {

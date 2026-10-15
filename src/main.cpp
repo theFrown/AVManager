@@ -1,7 +1,7 @@
 #include <iostream>
 #include <format>
-#include "AVRHandler.h"
-#include "keyboard.h"
+#include "avr_handler.h"
+#include "keyboard_hook.h"
 #include "timing.h"
 #include "logger.h"
 

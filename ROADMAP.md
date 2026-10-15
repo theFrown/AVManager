@@ -237,7 +237,7 @@ goes on the side whose other half can be faked.
   what Windows is sending, and localise mismatches. Starts with a baseline capture of the
   Windows audio state.
 - **40** · 🚧 · `investigate` — Decode the extra lines the receiver sends after our queries
-  and as unsolicited events (samples in `DenonProtocol.h`; none appear in the command tables
+  and as unsolicited events (samples in `denon_protocol.h`; none appear in the command tables
   we have). Promising for goal 1B: `SYSDA` (apparently the incoming audio format),
   `OPINFINS` (apparently which input channels are present), `OPINFASP` (apparently which
   speakers are active), `SSINFAISSIG` (an input-signal code). Decode by controlled

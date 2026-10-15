@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 project(AVManager LANGUAGES CXX)
-add_executable(AVManager src/main.cpp src/AVRHandler.cpp src/keyboard.cpp src/logger.cpp)
+add_executable(AVManager src/main.cpp src/avr_handler.cpp src/keyboard_hook.cpp src/logger.cpp)
 target_compile_features(AVManager PRIVATE cxx_std_20)
 target_link_libraries(AVManager ws2_32)
 target_compile_definitions(AVManager PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)

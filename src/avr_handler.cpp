@@ -9,9 +9,9 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>    //lean + nomin in CMakeLists
-#include "AVRHandler.h"
-#include "DenonProtocol.h"
-#include "keyboard.h"
+#include "avr_handler.h"
+#include "denon_protocol.h"
+#include "keyboard_hook.h"
 #include "timing.h"
 
 AVRHandler::AVRHandler(std::function<bool(std::string_view)> log, Verbosity verbosity) 

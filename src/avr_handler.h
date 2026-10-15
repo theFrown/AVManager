@@ -8,7 +8,7 @@
 #include <winsock2.h>
 #include "timing.h"
 
-struct KeyStates; //defined in keyboard.h, pulled in by AVRHandler.cpp before SyncKeys uses it
+struct KeyStates; //defined in keyboard_hook.h, pulled in by avr_handler.cpp before SyncKeys uses it
 
 enum class Verbosity { Silent, Error, Warning, Info, Debug, Trace};
 

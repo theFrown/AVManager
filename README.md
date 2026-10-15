@@ -51,12 +51,12 @@ The repo includes a dedicated [roadmap](ROADMAP.md) with more detail, but the sh
 
 ## How it works
 
-- `KeyboardHook` (keyboard.h/cpp) registers a low level hook in a dedicated thread, which runs a blocking message loop such that Windows runs its callback (`ProcessKeys`) on any keystroke. The callback reads the keys and usually passes them straight through to Windows, unless they are key-downs or key-ups for volume up, down and mute. 
+- `KeyboardHook` (keyboard_hook.h/.cpp) registers a low level hook in a dedicated thread, which runs a blocking message loop such that Windows runs its callback (`ProcessKeys`) on any keystroke. The callback reads the keys and usually passes them straight through to Windows, unless they are key-downs or key-ups for volume up, down and mute. 
   - ***Returning immediately is critical for gaming input latency***, returning fast is critical to not be annoying in general, and Windows might even drop our hook after 300 ms delay in handling the keystroke. (not observed in testing)
 - volume up, down and mute are stored in the `KeyStates` struct atomically (in separate members for the different modifiers), and a thread message is sent (if a listener's thread ID has been registered). 
 - Modifiers (ctrl, alt, shift) are stored separately in order to direct keypresses to the right member of the struct. This is essential for ctrl+alt edge cases. With shift as modifier the volume keys *are* passed to Windows.
-- `AVRHandler` (.h/.cpp) creates a winsock2 socket, opens the connection to the Denon and manages sending, receiving and any errors and edge cases arising from it.
-- DenonProtocol.h contains the relevant commands and formats of expected responses from the Denon
+- `AVRHandler` (avr_handler.h/.cpp) creates a winsock2 socket, opens the connection to the Denon and manages sending, receiving and any errors and edge cases arising from it.
+- denon_protocol.h contains the relevant commands and formats of expected responses from the Denon
 - `AVRHandler` also contains the control loop (to be split out soon) that manages the 3 states:
   - `requested_`, the state we ***want*** the Denon to be in (i.e. whatever keys have been pressed and processed)
   - `commanded_`, the state we ***told*** the Denon to be in (i.e. whatever commands have actually been sent to the Denon without error)
