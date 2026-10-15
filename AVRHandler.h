@@ -4,6 +4,7 @@
 #include <array>
 #include <string>
 #include <optional>
+#include <functional>
 #include <winsock2.h>
 #include "timing.h"
 
@@ -57,7 +58,8 @@ struct DenonState {
 
 class AVRHandler {
 public:
-    explicit AVRHandler(Verbosity verbosity = Verbosity::Info);
+    explicit AVRHandler(std::function<bool(std::string_view)> log, 
+                        Verbosity verbosity = Verbosity::Info);
     ~AVRHandler();
     AVRHandler(const AVRHandler&) = delete;
     AVRHandler(AVRHandler&&) = delete;
@@ -98,6 +100,9 @@ private:
     Timer command_cooldown_{50};
     Timer response_deadline_{200};
     
+    Verbosity verbosity_;   //constructor initializer list
+    std::function<bool(std::string_view)> log_; //constructor initializer list
+
     std::array<char, inbufferlen_ + 1> inbuffer_ = {};
     std::string inchain_;
     std::string inmessage_;
@@ -106,7 +111,6 @@ private:
     SOCKET socket_ = INVALID_SOCKET;
     WSAEVENT socket_event_ = WSA_INVALID_EVENT;
     sockaddr_in sockaddr_ = {};
-    Verbosity verbosity_;   //constructor initializer list
     ControlMode_ control_mode_ = ControlMode_::Report;
     DenonState requested_;
     DenonState commanded_;

@@ -14,8 +14,8 @@
 #include "keyboard.h"
 #include "timing.h"
 
-AVRHandler::AVRHandler(Verbosity verbosity) 
-    : verbosity_(verbosity)
+AVRHandler::AVRHandler(std::function<bool(std::string_view)> log, Verbosity verbosity) 
+    : verbosity_(verbosity), log_(std::move(log))
 {   
     Report_ response = SetupSocket();
     if (response != Report_::OK) {
@@ -869,37 +869,44 @@ std::optional<int> AVRHandler::StringToDb(std::string_view str, int zero) {
         return std::stoi(string) - zero;
     }
     catch (const std::invalid_argument&) {
-        std::cerr << std::format("[WARNING] Invalid string characters for db conversion: [{}]\n",
-                                               string);
         return std::nullopt;
     }
     catch (const std::out_of_range&) {
-        std::cerr << std::format("[WARNING] String too large for db conversion: [{}]\n", string);
         return std::nullopt;
     }
 }
 
 void AVRHandler::Print(Verbosity level, std::string_view msg) const {
     if (verbosity_ < level) return;
+    std::string_view prefix;
     switch (level) {
         case Verbosity::Error:
-            std::cerr << "[ERROR] " << msg;
+            prefix = "[ERROR] ";
             break;
         case Verbosity::Warning:
-            std::cerr << "[WARNING] " << msg;
+            prefix = "[WARNING] ";
             break;
         case Verbosity::Info:
-            std::cout << msg;
+            prefix = "";
             break;
         case Verbosity::Debug:
-            std::cout << "[DEBUG] " << msg;
+            prefix = "[DEBUG] ";
             break;
         case Verbosity::Trace:
-            std::cout << "[TRACE] " << msg;
+            prefix = "[TRACE] ";
             break;
         default:
-            std::cerr << "[ERROR] Print called with invalid verbosity level\n    Message: " << msg;
+            prefix = "[ERROR] Print called with invalid verbosity level\n    Message: ";
             break;
+    }
+    //using the hack below only to avoid having more relevant changes in the diff hidden by a bunch 
+    //of removed endlines throughout this file. to be reversed in the next commit
+    if (msg.ends_with('\n')) msg.remove_suffix(1);
+
+    bool response = log_(std::format("{}{}", prefix, msg));
+    if (!response) {
+        std::cerr << "[ERROR] AVRHandler call to Logger failed on the following message: \n";
+        std::cerr << std::format("{}{}\n", prefix, msg);
     }
     return;
 }
@@ -908,36 +915,48 @@ void AVRHandler::PrintStates(Verbosity level) {
     if (verbosity_ < level) return;
     int w1 = 13;
     int w2 = w1 - 3;
-    std::cout <<             "States:        |   Requested   |   Commanded   |   Reported   \n";
-    std::cout <<             "==============================================================\n";
-    std::cout << std::format("power state:   | {: >{}} | {: >{}} | {: >{}}\n",
-                             requested_.power.substr(0, w1), w1, commanded_.power.substr(0, w1), w1,
-                             reported_.power.substr(0, w1), w1);
-    std::cout << std::format("input/source:  | {: >{}} | {: >{}} | {: >{}}\n",
-                             requested_.input.substr(0, w1), w1, commanded_.input.substr(0, w1), w1,
-                             reported_.input.substr(0, w1), w1);
-    std::cout << std::format("surround mode: | {: >{}} | {: >{}} | {: >{}}\n",
-                             requested_.surround.substr(0, w1), w1, commanded_.surround.substr(0, w1),
-                             w1, reported_.surround.substr(0, w1), w1);
-    std::cout << std::format("mute:          | {: >{}} | {: >{}} | {: >{}}\n", 
-                             requested_.mute.substr(0, w1), w1, commanded_.mute.substr(0, w1), w1,
-                             reported_.mute.substr(0, w1), w1);
-    std::cout << std::format("volume:        | {} | {} | {}\n", PrintDb(requested_.volume, w2), 
-                             PrintDb(commanded_.volume, w2), PrintDb(reported_.volume, w2));
-    std::cout << std::format("maxvolume:     | {} | {} | {}\n", PrintDb(requested_.maxvolume, w2), 
-                             PrintDb(commanded_.maxvolume, w2), PrintDb(reported_.maxvolume, w2));
-    std::cout << std::format("chanvol FL:    | {} | {} | {}\n", PrintDb(requested_.chanvol.FL, w2), 
-                             PrintDb(commanded_.chanvol.FL, w2), PrintDb(reported_.chanvol.FL, w2));
-    std::cout << std::format("chanvol FR:    | {} | {} | {}\n", PrintDb(requested_.chanvol.FR, w2), 
-                             PrintDb(commanded_.chanvol.FR, w2), PrintDb(reported_.chanvol.FR, w2));
-    std::cout << std::format("chanvol C:     | {} | {} | {}\n", PrintDb(requested_.chanvol.C, w2), 
-                             PrintDb(commanded_.chanvol.C, w2), PrintDb(reported_.chanvol.C, w2));
-    std::cout << std::format("chanvol SW:    | {} | {} | {}\n", PrintDb(requested_.chanvol.SW, w2),
-                             PrintDb(commanded_.chanvol.SW, w2), PrintDb(reported_.chanvol.SW, w2));
-    std::cout << std::format("chanvol SL:    | {} | {} | {}\n", PrintDb(requested_.chanvol.SL, w2), 
-                             PrintDb(commanded_.chanvol.SL, w2), PrintDb(reported_.chanvol.SL, w2));
-    std::cout << std::format("chanvol SR:    | {} | {} | {}\n", PrintDb(requested_.chanvol.SR, w2), 
-                             PrintDb(commanded_.chanvol.SR, w2), PrintDb(reported_.chanvol.SR, w2));
+    std::string table;
+    table.reserve(1024); //was 997 chars when last checked
+    table += "Current state variables of the Denon:\n";  //this line gets the timestamp
+    table += "    States:        |   Requested   |   Commanded   |   Reported   \n";
+    table += "    ==============================================================\n";
+    std::format_to(std::back_inserter(table), "    power state:   | {: >{}} | {: >{}} | {: >{}}\n",
+                   requested_.power.substr(0, w1), w1, commanded_.power.substr(0, w1), w1,
+                   reported_.power.substr(0, w1), w1);
+    std::format_to(std::back_inserter(table), "    input/source:  | {: >{}} | {: >{}} | {: >{}}\n",
+                   requested_.input.substr(0, w1), w1, commanded_.input.substr(0, w1), w1,
+                   reported_.input.substr(0, w1), w1);
+    std::format_to(std::back_inserter(table), "    surround mode: | {: >{}} | {: >{}} | {: >{}}\n",
+                   requested_.surround.substr(0, w1), w1, commanded_.surround.substr(0, w1),
+                   w1, reported_.surround.substr(0, w1), w1);
+    std::format_to(std::back_inserter(table), "    mute:          | {: >{}} | {: >{}} | {: >{}}\n", 
+                   requested_.mute.substr(0, w1), w1, commanded_.mute.substr(0, w1), w1,
+                   reported_.mute.substr(0, w1), w1);
+    std::format_to(std::back_inserter(table), "    volume:        | {} | {} | {}\n", 
+                   PrintDb(requested_.volume, w2), PrintDb(commanded_.volume, w2), 
+                   PrintDb(reported_.volume, w2));
+    std::format_to(std::back_inserter(table), "    maxvolume:     | {} | {} | {}\n", 
+                   PrintDb(requested_.maxvolume, w2), PrintDb(commanded_.maxvolume, w2), 
+                   PrintDb(reported_.maxvolume, w2));
+    std::format_to(std::back_inserter(table), "    chanvol FL:    | {} | {} | {}\n", 
+                   PrintDb(requested_.chanvol.FL, w2), PrintDb(commanded_.chanvol.FL, w2), 
+                   PrintDb(reported_.chanvol.FL, w2));
+    std::format_to(std::back_inserter(table), "    chanvol FR:    | {} | {} | {}\n", 
+                   PrintDb(requested_.chanvol.FR, w2), PrintDb(commanded_.chanvol.FR, w2), 
+                   PrintDb(reported_.chanvol.FR, w2));
+    std::format_to(std::back_inserter(table), "    chanvol C:     | {} | {} | {}\n", 
+                   PrintDb(requested_.chanvol.C, w2), PrintDb(commanded_.chanvol.C, w2), 
+                   PrintDb(reported_.chanvol.C, w2));
+    std::format_to(std::back_inserter(table), "    chanvol SW:    | {} | {} | {}\n", 
+                   PrintDb(requested_.chanvol.SW, w2), PrintDb(commanded_.chanvol.SW, w2), 
+                   PrintDb(reported_.chanvol.SW, w2));
+    std::format_to(std::back_inserter(table), "    chanvol SL:    | {} | {} | {}\n", 
+                   PrintDb(requested_.chanvol.SL, w2), PrintDb(commanded_.chanvol.SL, w2), 
+                   PrintDb(reported_.chanvol.SL, w2));
+    std::format_to(std::back_inserter(table), "    chanvol SR:    | {} | {} | {}\n", 
+                   PrintDb(requested_.chanvol.SR, w2), PrintDb(commanded_.chanvol.SR, w2), 
+                   PrintDb(reported_.chanvol.SR, w2));
+    Print(level, table);
 }
 
 std::string AVRHandler::PrintDb(int value, int width) {

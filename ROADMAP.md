@@ -6,7 +6,7 @@ Where the project is going and why. Working document: it is updated as decisions
 
 - Every item has a **permanent number**. Numbers are never reused or renumbered, even when
   an item is finished, dropped or moved to another stage. New items take the next free
-  number, whichever stage they land in. **Next free number: 55.**
+  number, whichever stage they land in. **Next free number: 56.**
 - Tags say what kind of work an item is: `feature`, `bug`, `refactor`, `test`, `infra`,
   `docs`, `decision` (a question to settle before building), `investigate`.
 - Status: ⬜ open · 🚧 in progress · ✅ done · ✖ dropped. Finished items stay where they are.
@@ -104,7 +104,7 @@ wrong.
   overwritten), opened for appending, flushed per line (a crash must not lose the last
   lines before it), and closed with an explicit end marker, so a file without one marks a
   run that died.
-- **48** · ⬜ · `feature` — A `Log` function directing prints to the relevant logging streams,
+- **48** · ✅ · `feature` — A `Log` function directing prints to the relevant logging streams,
   owning timestamps and line endings, with `AVRHandler` (through its existing `Print`, which
   keeps filtering by verbosity for now) and `main` routed through it. Main thread only for now
   (see item 50).
@@ -119,6 +119,13 @@ wrong.
   `Parse`, `ProcessCombo`.
 - **15** · ⬜ · `infra` — GitHub Actions: build and run tests on `windows-latest` on every
   push.
+- **55** · ⬜ · `bug` — Non-ASCII paths: converting a path to text uses the system code
+  page, so characters outside it (e.g. "Ł" in a username) make the conversion throw and
+  end the program at logger start-up, and characters inside it (e.g. "ü") print garbled.
+  Solution chosen: an application manifest that makes UTF-8 the process code page, plus
+  `SetConsoleOutputCP(CP_UTF8)` so the console displays it, and the `/utf-8` compiler flag
+  so source files are always read as UTF-8 (until then, sources stay ASCII-only). Relevant
+  once others build or run the program.
 - **16** · ⬜ · `infra` — Build a release executable on version tags and attach it to a
   GitHub Release. Before it is useful to anyone else: a configurable receiver address
   (currently hard-coded), the C runtime linked statically so no redistributable is needed,

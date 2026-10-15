@@ -3,6 +3,9 @@
 #include <fstream>
 #include <string>
 #include <filesystem>
+#include <optional>
+
+class Timestamp; //defined in timing.h, which logger.cpp pulls in before using it
 
 class Logger {
 public:
@@ -13,7 +16,8 @@ public:
     Logger& operator=(const Logger&) = delete;
     Logger& operator=(Logger&&) = delete;
 
-    int Start(bool portable = false);
+    bool Start(bool portable = false);
+    bool Log(std::string_view string, bool timestamp = true);
     static std::filesystem::path GetExecutablePath();
     static std::filesystem::path GetLocalAppdataPath();
     static bool CreateFileIfNew(const std::filesystem::path& path);
@@ -26,8 +30,11 @@ private:
     constexpr static const char* log_file_format_ = "{}{}.txt";
     std::filesystem::path folder_path_;
     std::ofstream log_file_;
+    bool has_visible_output_ = false;
+    bool has_log_output_ = false;
 
     bool MakeFolderPath(bool portable);
     bool CreateLog();
-    bool Write(std::string_view string, bool timestamp = true);
+    static bool Write(std::ostream& stream, std::string_view string, 
+                      std::optional<Timestamp> timestamp);
 };
