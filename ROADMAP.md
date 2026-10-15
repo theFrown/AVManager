@@ -111,10 +111,10 @@ wrong.
 - **12** · 🚧 · `docs` — README: purpose, status, how to build, architecture overview, link
   to Denon's official control protocol document. `main` no longer runs test scaffolding,
   so build instructions are now possible.
-- **13** · ⬜ · `test` — GoogleTest via CMake `FetchContent`, registered with CTest. Port the
-  existing dB-conversion test to it. Starts with a pure move commit (no edits): sources
-  into `src/`, file names to snake_case, and the program's code as a library that both the
-  application and the tests link.
+- **13** · 🚧 · `test` — GoogleTest via CMake `FetchContent`, registered with CTest. Port the
+  existing dB-conversion test to it. Preceded by restructuring: sources moved into `src/`,
+  file names in snake_case (with only the include and build-path edits each step needs),
+  and the program's code as a library that both the application and the tests link.
 - **14** · ⬜ · `test` — Unit tests for the other pure functions: `StringToDb`, `MakeCommand`,
   `Parse`, `ProcessCombo`.
 - **15** · ⬜ · `infra` — GitHub Actions: build and run tests on `windows-latest` on every
