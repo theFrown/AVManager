@@ -876,41 +876,6 @@ std::optional<int> AVRHandler::StringToDb(std::string_view str, int zero) {
     }
 }
 
-void AVRHandler::Print(Verbosity level, std::string_view msg) const {
-    if (verbosity_ < level) return;
-    std::string_view prefix;
-    switch (level) {
-        case Verbosity::Error:
-            prefix = "[ERROR] ";
-            break;
-        case Verbosity::Warning:
-            prefix = "[WARNING] ";
-            break;
-        case Verbosity::Info:
-            prefix = "";
-            break;
-        case Verbosity::Debug:
-            prefix = "[DEBUG] ";
-            break;
-        case Verbosity::Trace:
-            prefix = "[TRACE] ";
-            break;
-        default:
-            prefix = "[ERROR] Print called with invalid verbosity level\n    Message: ";
-            break;
-    }
-    //using the hack below only to avoid having more relevant changes in the diff hidden by a bunch 
-    //of removed endlines throughout this file. to be reversed in the next commit
-    if (msg.ends_with('\n')) msg.remove_suffix(1);
-
-    bool response = log_(std::format("{}{}", prefix, msg));
-    if (!response) {
-        std::cerr << "[ERROR] AVRHandler call to Logger failed on the following message: \n";
-        std::cerr << std::format("{}{}\n", prefix, msg);
-    }
-    return;
-}
-
 void AVRHandler::PrintStates(Verbosity level) {
     if (verbosity_ < level) return;
     int w1 = 13;
@@ -976,4 +941,39 @@ std::string AVRHandler::PrintDb(int value, int width) {
             return std::format("{:+{}.1f} db", value / 10.0, width);
         }
     }
+}
+
+void AVRHandler::Print(Verbosity level, std::string_view msg) const {
+    if (verbosity_ < level) return;
+    std::string_view prefix;
+    switch (level) {
+        case Verbosity::Error:
+            prefix = "[ERROR] ";
+            break;
+        case Verbosity::Warning:
+            prefix = "[WARNING] ";
+            break;
+        case Verbosity::Info:
+            prefix = "";
+            break;
+        case Verbosity::Debug:
+            prefix = "[DEBUG] ";
+            break;
+        case Verbosity::Trace:
+            prefix = "[TRACE] ";
+            break;
+        default:
+            prefix = "[ERROR] Print called with invalid verbosity level\n    Message: ";
+            break;
+    }
+    //using the hack below only to avoid having more relevant changes in the diff hidden by a bunch 
+    //of removed endlines throughout this file. to be reversed in the next commit
+    if (msg.ends_with('\n')) msg.remove_suffix(1);
+
+    bool response = log_(std::format("{}{}", prefix, msg));
+    if (!response) {
+        std::cerr << "[ERROR] AVRHandler call to Logger failed on the following message: \n";
+        std::cerr << std::format("{}{}\n", prefix, msg);
+    }
+    return;
 }

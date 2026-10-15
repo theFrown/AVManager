@@ -144,7 +144,7 @@ private:
     Report_ Parse();
     Report_ Send(std::string_view cmd, bool wait = false);
     
+    void PrintStates(Verbosity level);
     void Print(Verbosity level, std::string_view msg) const;
     void Print(std::string_view msg) const { Print(Verbosity::Info, msg); }
-    void PrintStates(Verbosity level);
 };

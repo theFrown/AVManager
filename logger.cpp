@@ -75,41 +75,6 @@ bool Logger::Log(std::string_view message, bool timestamp) {
     return (visible_success || log_success);
 }
 
-bool Logger::CreateLog() {
-    if (folder_path_.empty()) return false;
-    std::string date_time = Timestamp{}.File();
-    std::filesystem::path file_path = folder_path_ / std::format(log_file_format_, date_time, "");
-    bool available = CreateFileIfNew(file_path);
-    int i = 0;
-    while (!available) {
-        i++;
-        if (i > 100) {
-            Write(std::cerr, "[ERROR] unable to create log file! Too many conflicting file names\n",
-                  Timestamp{});
-            return false;
-        }
-        file_path = folder_path_ / std::format(log_file_format_, date_time, 
-                                               std::format("_{:03d}", i));
-        available = CreateFileIfNew(file_path);
-    }
-    log_file_.open(file_path, std::ios::app);
-    if (log_file_.fail()) {
-        Write(std::cerr, std::format("[ERROR] Logger failed to open created log file:\n    {}\n",
-                                     file_path.string()), Timestamp{});
-        return false;
-    }
-    Write(log_file_, start_marker_, std::nullopt);
-    return Write(log_file_, "Log created", Timestamp{});
-}
-
-bool Logger::Write(std::ostream& stream, std::string_view message, std::optional<Timestamp> time) {
-    if (time) stream << time->Prefix();
-    stream << message;
-    stream << (message.ends_with('\n') ? "    [WARNING] unnecessary endline!\n" : "\n");
-    stream << std::flush;
-    return stream.good();
-}
-
 bool Logger::MakeFolderPath(bool portable) {
     if (portable) {
         std::filesystem::path path = GetExecutablePath();
@@ -164,6 +129,33 @@ std::filesystem::path Logger::GetLocalAppdataPath() {
     return std::filesystem::path(managed_string.get());
 }
 
+bool Logger::CreateLog() {
+    if (folder_path_.empty()) return false;
+    std::string date_time = Timestamp{}.File();
+    std::filesystem::path file_path = folder_path_ / std::format(log_file_format_, date_time, "");
+    bool available = CreateFileIfNew(file_path);
+    int i = 0;
+    while (!available) {
+        i++;
+        if (i > 100) {
+            Write(std::cerr, "[ERROR] unable to create log file! Too many conflicting file names\n",
+                  Timestamp{});
+            return false;
+        }
+        file_path = folder_path_ / std::format(log_file_format_, date_time, 
+                                               std::format("_{:03d}", i));
+        available = CreateFileIfNew(file_path);
+    }
+    log_file_.open(file_path, std::ios::app);
+    if (log_file_.fail()) {
+        Write(std::cerr, std::format("[ERROR] Logger failed to open created log file:\n    {}\n",
+                                     file_path.string()), Timestamp{});
+        return false;
+    }
+    Write(log_file_, start_marker_, std::nullopt);
+    return Write(log_file_, "Log created", Timestamp{});
+}
+
 bool Logger::CreateFileIfNew(const std::filesystem::path& path) {
     HANDLE windows_file_handle = CreateFileW(path.wstring().c_str(), GENERIC_WRITE, 0, nullptr, 
                                              CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -189,4 +181,12 @@ bool Logger::CreateFileIfNew(const std::filesystem::path& path) {
         return false; //this is a choice, returning false ensures nothing else tries to open it
     }
     return true;
+}
+
+bool Logger::Write(std::ostream& stream, std::string_view message, std::optional<Timestamp> time) {
+    if (time) stream << time->Prefix();
+    stream << message;
+    stream << (message.ends_with('\n') ? "    [WARNING] unnecessary endline!\n" : "\n");
+    stream << std::flush;
+    return stream.good();
 }
