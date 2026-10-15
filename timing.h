@@ -78,13 +78,13 @@ public:
             return static_cast<int>(std::chrono::duration_cast<MilliSeconds_>(delta).count());
         }
     }
-    void Print(bool reset = false) {
+    std::string Format(bool reset = false) {
         auto value = Read(reset);
         if (value.has_value()) {
-            std::cout << std::format("Time elapsed: {} ms\n", *value);
+            return std::format("Time elapsed: {} ms", *value);
         }
         else {
-            std::cout << "stopwatch wasn't running!\n";
+            return "Stopwatch wasn't running!";
         }
     }
 };

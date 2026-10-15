@@ -22,7 +22,7 @@ int main() {
     {
         auto log_lambda = [&log](std::string_view message) -> bool { return log.Log(message); };
         log.Log("AVManager starting");
-        AVRHandler avr{log_lambda, Verbosity::Debug};
+        AVRHandler avr{log_lambda, Verbosity::Trace};
         AVRHandler::CtorCode avr_status = avr.GetCtorStatus();
         if (avr_status != AVRHandler::CtorCode::Healthy) {
             log.Log(std::format("[ERROR] AVRHandler creation failed with error code: {}",

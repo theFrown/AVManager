@@ -38,7 +38,7 @@ bool Logger::Start(bool portable) {
         has_log_output_ = false;
         if (has_visible_output_) {
             Write(std::cerr, "[WARNING] Logger failed to create folder, proceeding with only "
-                             "the console!\n", Timestamp{});
+                             "the console!", Timestamp{});
             return true;
         }
         return false;
@@ -48,7 +48,7 @@ bool Logger::Start(bool portable) {
         has_log_output_ = false;
         if (has_visible_output_) {
             Write(std::cerr, "[WARNING] Logger failed to create file, proceeding with only the "
-                             "console!\n", Timestamp{});
+                             "console!", Timestamp{});
             return true;
         }
         return false;
@@ -90,7 +90,7 @@ bool Logger::MakeFolderPath(bool portable) {
     std::filesystem::create_directories(folder_path_, ec);
     if (ec) {
         Write(std::cerr, std::format("[ERROR] Logger failed to create/find the log folder:\n    {}"
-                                     "\n    with error code: {} and error message: {}\n", 
+                                     "\n    with error code: {} and error message: {}", 
                                      folder_path_.string(), ec.value(), ec.message()), Timestamp{});
         folder_path_.clear();
         return false;
@@ -107,7 +107,7 @@ std::filesystem::path Logger::GetExecutablePath() {
     if ((returnsize == 0) || (returnsize == pathsize)) {
         DWORD error = GetLastError();
         Write(std::cerr, std::format("[ERROR] Failed to retrieve path to executable with error: "
-                                     "{}\n", error), Timestamp{});
+                                     "{}", error), Timestamp{});
         return {};
     }
     return std::filesystem::path(filepath_array);
@@ -123,7 +123,7 @@ std::filesystem::path Logger::GetLocalAppdataPath() {
     }
     if (result != S_OK) {
         Write(std::cerr, std::format("[ERROR] Failed to retrieve path to Local Appdata with error: "
-                                     "{:#x}\n", static_cast<unsigned long>(result)), Timestamp{});
+                                     "{:#x}", static_cast<unsigned long>(result)), Timestamp{});
         return {};
     } 
     return std::filesystem::path(managed_string.get());
@@ -138,7 +138,7 @@ bool Logger::CreateLog() {
     while (!available) {
         i++;
         if (i > 100) {
-            Write(std::cerr, "[ERROR] unable to create log file! Too many conflicting file names\n",
+            Write(std::cerr, "[ERROR] unable to create log file! Too many conflicting file names",
                   Timestamp{});
             return false;
         }
@@ -148,7 +148,7 @@ bool Logger::CreateLog() {
     }
     log_file_.open(file_path, std::ios::app);
     if (log_file_.fail()) {
-        Write(std::cerr, std::format("[ERROR] Logger failed to open created log file:\n    {}\n",
+        Write(std::cerr, std::format("[ERROR] Logger failed to open created log file:\n    {}",
                                      file_path.string()), Timestamp{});
         return false;
     }
@@ -163,11 +163,11 @@ bool Logger::CreateFileIfNew(const std::filesystem::path& path) {
         DWORD error = GetLastError();
         if (error == ERROR_FILE_EXISTS) {
             Write(std::cerr, std::format("[WARNING] Logger tried to create a second log file with "
-                                         "the same name:\n    {}\n", path.string()), Timestamp{});
+                                         "the same name:\n    {}", path.string()), Timestamp{});
         }
         else {
             Write(std::cerr, std::format("[ERROR] Logger could not create file with name:\n    {}\n"
-                                         "    with error: {}\n", path.string(), error), 
+                                         "    with error: {}", path.string(), error), 
                                          Timestamp{});
         }
         return false;
@@ -176,7 +176,7 @@ bool Logger::CreateFileIfNew(const std::filesystem::path& path) {
     if (result == 0) {
         DWORD error = GetLastError();
         Write(std::cerr, std::format("[WARNING] Logger could not close Windows file handle to file:"
-                                     "\n    {}\n    with error: {}\n", path.string(), error),
+                                     "\n    {}\n    with error: {}", path.string(), error),
                                      Timestamp{});
         return false; //this is a choice, returning false ensures nothing else tries to open it
     }
