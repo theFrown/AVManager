@@ -14,10 +14,11 @@
 #include "keyboard_hook.h"
 #include "timing.h"
 
-AVRHandler::AVRHandler(std::function<bool(std::string_view)> log, Verbosity verbosity) 
-    : verbosity_(verbosity), log_(std::move(log))
+AVRHandler::AVRHandler(std::function<bool(std::string_view)> log, std::string_view ip_address,
+                       Verbosity verbosity) 
+    : log_(std::move(log)), verbosity_(verbosity)
 {   
-    Report_ response = SetupSocket();
+    Report_ response = SetupSocket(ip_address);
     if (response != Report_::OK) {
         ctor_status_ = CtorCode::SocketSetupFailed;
     }
@@ -62,8 +63,10 @@ AVRHandler::~AVRHandler() {
             if (response == SOCKET_ERROR) {
                 response = WSAGetLastError();
             }
-            Print(Verbosity::Warning, std::format("Socket shutdown failed with error: {}\n"
-                                                  "    proceeding with hard shutdown", response));
+            if (response != WSAENOTCONN) { //if we weren't connected, shutdown failing is ok
+                Print(Verbosity::Warning, std::format("Socket shutdown failed with error: {}\n    "
+                                                      "proceeding with hard shutdown", response));
+            }
             linger value{.l_onoff = 1, .l_linger = 0};
             const char* value_byteaddress = reinterpret_cast<const char*>(&value);
             setsockopt(socket_, SOL_SOCKET, SO_LINGER, value_byteaddress, sizeof(value));
@@ -365,28 +368,10 @@ auto AVRHandler::SyncKeyHook(bool flush) -> Report_ {
     return Report_::OK; //only reports success, control_mode_ handles whether there was input
 }
 
-int AVRHandler::SyncKeys(KeyStates& keys) {
-    int requests = 0;
-    int steps = 0;
-    
-    steps = keys.mute.counter.exchange(0);
-    if (steps) {
-        std::string requested;
-        if (steps > 1) {
-            requested = "ON"; //safest interpretation if someone is holding this key down
-        }
-        else {
-            requested = requested_.mute == "ON" ? "OFF" : "ON"; //activate when stored mute is empty
-        }
-        if (requested != requested_.mute) {
-            requests++;
-            requested_.mute = requested;
-        }
-    }
-
-    steps = keys.vup.bare.counter.exchange(0) - keys.vdown.bare.counter.exchange(0);
+int AVRHandler::SyncKeys(KeyStates& keys) { 
+    int steps = keys.vup.bare.counter.exchange(0) - keys.vdown.bare.counter.exchange(0);
     if (steps > max_volume_increase_steps_) steps = max_volume_increase_steps_;
-    requests += SyncVolumeKey(steps, requested_.volume, min_volume_, reported_.maxvolume);
+    int requests = SyncVolumeKey(steps, requested_.volume, min_volume_, reported_.maxvolume);
 
     steps = keys.vup.ctrl.counter.exchange(0) - keys.vdown.ctrl.counter.exchange(0);
     requests += SyncVolumeKey(steps, requested_.chanvol.C, min_chanvol_, max_chanvol_);
@@ -395,6 +380,8 @@ int AVRHandler::SyncKeys(KeyStates& keys) {
     requests += SyncVolumeKey(steps, requested_.chanvol.SL, min_chanvol_, max_chanvol_);
     requests += SyncVolumeKey(steps, requested_.chanvol.SR, min_chanvol_, max_chanvol_);
     
+    requests += SyncMuteKeys(keys);
+
     return requests;
 }
 
@@ -409,6 +396,36 @@ bool AVRHandler::SyncVolumeKey(int steps, int& stored_value, int min, int max) {
         }
     }
     return false;
+}
+
+int AVRHandler::SyncMuteKeys(KeyStates& keys) {
+    int requests = 0;
+    int steps = keys.mute.bare.counter.exchange(0);
+    if (steps) {
+        std::string requested;
+        if (steps > 1) {
+            requested = "ON"; //safest interpretation if someone is holding this key down
+        }
+        else {
+            requested = requested_.mute == "ON" ? "OFF" : "ON"; //activate when stored mute is empty
+        }
+        if (requested != requested_.mute) {
+            requests++;
+            requested_.mute = requested;
+        }
+    }
+    steps = keys.mute.ctrl.counter.exchange(0);
+    if (steps && (requested_.chanvol.C != 0)) {
+        requests++;
+        requested_.chanvol.C = 0;
+    }
+    steps = keys.mute.alt.counter.exchange(0);
+    if (steps && ((requested_.chanvol.SL != 0) || (requested_.chanvol.SR != 0))) {
+        requests++;
+        requested_.chanvol.SL = 0;
+        requested_.chanvol.SR = 0;
+    }
+    return requests;
 }
 
 auto AVRHandler::SyncIn() -> Report_ {
@@ -531,6 +548,11 @@ auto AVRHandler::SyncOut() -> Report_ {
     command_cooldown_.Reset(); //cheaper to always run than checking if it was set
     if (commanded_ == requested_) return Report_::NoData;
     Report_ response = Report_::Unknown;
+    if (reported_.power == "STANDBY") {
+        Print(Verbosity::Warning, "AVR reports it is powered off, swallowing all commands");
+        SyncRest(Verbosity::Trace);
+        return Report_::OK;
+    }
     if (commanded_.mute != requested_.mute) {
         control_mode_ = ControlMode_::Request;
         response = Send(denon_cmd::mute_prefix + requested_.mute);
@@ -611,13 +633,10 @@ auto AVRHandler::SyncResolve() -> Report_ {
                 }
                 else { //current loop design should make this impossible
                     Print(Verbosity::Info, "Reported state matches requested state, despite pending"
-                                           "commands\n    ignoring unconfirmed commands.");
+                                           " commands\n    ignoring unconfirmed commands.");
                     commanded_ = requested_;
                 }
-                failed_syncs_ = 0;
-                response_deadline_.Reset();
-                control_mode_ = ControlMode_::Rest;
-                PrintStates(Verbosity::Debug);
+                SyncRest(Verbosity::Debug);
                 return Report_::OK;
             }
             else {
@@ -643,19 +662,23 @@ auto AVRHandler::SyncResolve() -> Report_ {
             Print(Verbosity::Info, "State successfully updated by AVR-originated change");
         }
         else {
-            Print(Verbosity::Warning, "SyncResolve called for unknown reasons,"
+            Print(Verbosity::Warning, "SyncResolve called for unknown reasons,\n"
                                       "    harmonizing all states to reported state");
         }
-        commanded_ = requested_ = reported_;
-        failed_syncs_ = 0;
-        response_deadline_.Reset();
-        control_mode_ = ControlMode_::Rest;
-        PrintStates(Verbosity::Debug);
+        SyncRest(Verbosity::Debug);
         return Report_::OK;
     }
 }
 
-auto AVRHandler::SetupSocket() -> Report_ {
+void AVRHandler::SyncRest(Verbosity level) {
+    commanded_ = requested_ = reported_;
+    failed_syncs_ = 0;
+    response_deadline_.Reset();
+    control_mode_ = ControlMode_::Rest;
+    PrintStates(level);
+}
+
+auto AVRHandler::SetupSocket(std::string_view ip_address) -> Report_ {
     Print(Verbosity::Info, "Setting up connection");
     connection_healthy_ = false;
     WSADATA wsadata;
@@ -672,7 +695,7 @@ auto AVRHandler::SetupSocket() -> Report_ {
     }
     sockaddr_.sin_family = AF_INET;
     sockaddr_.sin_port   = htons(port_);
-    response = inet_pton(AF_INET, ip_string_, &sockaddr_.sin_addr);
+    response = inet_pton(AF_INET, ip_address.data(), &sockaddr_.sin_addr);
     if (response != 1) {
         if (response == 0) {
             Print(Verbosity::Error, "Failed to convert IP address, bad input");
@@ -694,7 +717,7 @@ auto AVRHandler::SetupSocket() -> Report_ {
     return Report_::OK;
 }
 
-auto AVRHandler::Connect() -> Report_ {
+auto AVRHandler::   Connect() -> Report_ {
     Print(Verbosity::Info, "Opening connection");
     connection_healthy_ = false;
     int response = connect(socket_, reinterpret_cast<const sockaddr*>(&sockaddr_), sizeof(sockaddr_));
@@ -702,8 +725,21 @@ auto AVRHandler::Connect() -> Report_ {
         if (response == SOCKET_ERROR) {
             response = WSAGetLastError();
         }
-        Print(Verbosity::Error, std::format("Failed to connect socket with error: {}", 
-                                            response));
+        switch (response) {
+            case WSAETIMEDOUT:
+                Print(Verbosity::Error, "Connection attempt timed out, check the IP address and \n"
+                                        "    if the AV-receiver is powered and configured");
+                break;
+            case WSAECONNREFUSED:
+                Print(Verbosity::Error, "Connection refused, possibly wrong target device");
+                break;
+            case WSAEHOSTUNREACH:
+                Print(Verbosity::Error, "Connection unreachable, possibly wrong subnet");
+                break;
+            default:
+                Print(Verbosity::Error, std::format("Failed to connect socket with error: {}", 
+                                                    response));
+        }
         return Report_::SocketError;
     }
     response = WSAEventSelect(socket_, socket_event_, FD_READ | FD_CLOSE);

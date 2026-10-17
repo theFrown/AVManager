@@ -6,7 +6,7 @@ Where the project is going and why. Working document: it is updated as decisions
 
 - Every item has a **permanent number**. Numbers are never reused or renumbered, even when
   an item is finished, dropped or moved to another stage. New items take the next free
-  number, whichever stage they land in. **Next free number: 56.**
+  number, whichever stage they land in. **Next free number: 63.**
 - Tags say what kind of work an item is: `feature`, `bug`, `refactor`, `test`, `infra`,
   `docs`, `decision` (a question to settle before building), `investigate`.
 - Status: ⬜ open · 🚧 in progress · ✅ done · ✖ dropped. Finished items stay where they are.
@@ -108,9 +108,19 @@ wrong.
   owning timestamps and line endings, with `AVRHandler` (through its existing `Print`, which
   keeps filtering by verbosity for now) and `main` routed through it. Main thread only for now
   (see item 50).
-- **12** · 🚧 · `docs` — README: purpose, status, how to build, architecture overview, link
-  to Denon's official control protocol document. `main` no longer runs test scaffolding,
-  so build instructions are now possible.
+- **58** · ✅ · `bug` — Fixes found while making the receiver address a command-line
+  argument: commands sent while the receiver is in standby are swallowed instead of being
+  retried and resynced forever; every route to the resting state goes through one function
+  that also clears the response deadline and failure count; connection failures name likely
+  causes (timeout, refused, unreachable); closing a socket that never connected no longer
+  warns; a missing return value in the resolve step is fixed.
+- **59** · ✅ · `feature` — Mute follows the same modifier rules as the volume keys:
+  Ctrl + mute resets the centre channel level to 0 dB, Alt + mute resets both surround
+  levels, Shift + mute goes to Windows, several modifiers mute the main volume.
+- **12** · ✅ · `docs` — README: purpose, status, architecture overview, and a link to the
+  control protocol document (Denon does not publish one for this model; the README links
+  the community copy). Building, configuration, usage and troubleshooting live in
+  `BUILDING.md`.
 - **13** · 🚧 · `test` — GoogleTest via CMake `FetchContent`, registered with CTest. Port the
   existing dB-conversion test to it. Preceded by restructuring: sources moved into `src/`,
   file names in snake_case (with only the include and build-path edits each step needs),
@@ -127,10 +137,10 @@ wrong.
   so source files are always read as UTF-8 (until then, sources stay ASCII-only). Relevant
   once others build or run the program.
 - **16** · ⬜ · `infra` — Build a release executable on version tags and attach it to a
-  GitHub Release. Before it is useful to anyone else: a configurable receiver address
-  (currently hard-coded), the C runtime linked statically so no redistributable is needed,
-  and a note on expected SmartScreen / antivirus warnings for an unsigned program with a
-  global keyboard hook.
+  GitHub Release. Before it is useful to anyone else: the C runtime linked statically so no
+  redistributable is needed, and a note on expected SmartScreen / antivirus warnings for an
+  unsigned program with a global keyboard hook. (The receiver address is already
+  configurable, as a command-line argument.)
 - **17** · ⬜ · `investigate` — Can GitHub's hosted Windows runners run tests that need a
   low-level keyboard hook and `SendInput`?
 - **18** · ✅ · `decision` — When to make the repository public. Public since October 2026.
@@ -193,11 +203,18 @@ goes on the side whose other half can be faked.
 - **27** · ⬜ · `feature` — A defined way to hand state across threads. Strings in the shared
   state are the case that can actually corrupt memory.
 - **28** · ⬜ · `feature` — Give up after repeated failed syncs instead of resyncing forever:
-  its own counter, and it returns the loop to Rest.
+  its own counter, and it returns the loop to Rest. (Standby, the predictable case, is
+  handled by item 58.)
+- **61** · ⬜ · `bug` — While the receiver powers up it sends a burst of unsolicited messages;
+  a volume key pressed in that window (~10 s) can be judged unconfirmed, causing retries
+  and a needless resync.
 - **29** · ⬜ · `feature` — Cap waits at a poll interval in degraded mode (without the socket
   event, each wait currently runs out its full deadline).
 - **30** · ⬜ · `feature` — Reconnect after losing the receiver, querying the volume before
   sending anything.
+- **60** · ⬜ · `investigate` — The program often exits after Windows sleeps and wakes.
+  Suspected: the connection does not survive sleep, so the first receive or send after
+  waking fails and ends the loop, which makes it a case for item 30.
 - **31** · ⬜ · `refactor` — Connection health as one evidence-driven state
   (healthy / degraded / dead) instead of separate flags.
 - **32** · ⬜ · `feature` — Busy-wait guard: several consecutive near-zero wakes force a
@@ -243,6 +260,10 @@ goes on the side whose other half can be faked.
   speakers are active), `SSINFAISSIG` (an input-signal code). Decode by controlled
   experiment: change the source (stereo, 7.1 LPCM, bitstream) and see which lines change.
   Feeds item 36; the recorded samples also seed the simulator (item 21).
+- **56** · ⬜ · `feature` — Command the receiver's power (on / standby). Power is currently
+  only reported, and while the receiver is in standby all commands are swallowed; once power
+  is commandable, power commands must pass that check, and it is to be decided whether a
+  volume key should wake the receiver.
 
 ## Unscheduled
 
@@ -262,6 +283,13 @@ goes on the side whose other half can be faked.
 - **44** · ⬜ · `bug` — Special values in the receiver's replies are parsed as ordinary
   levels: `CVSW 00` means subwoofer off (currently read as −50 dB, outside the channel
   range), and `MV00` means volume off (the receiver displays `---`, not −80 dB).
+- **62** · ⬜ · `feature` — Use the receiver's own volume step setting (0.5 dB or 1 dB, as
+  configured on the receiver) instead of the fixed 0.5 dB step in the code, read from the
+  receiver if the protocol exposes it. First verify whether a receiver set to 1 dB steps
+  ignores half-dB commands.
+- **57** · ⬜ · `refactor` — Protocol state values (`STANDBY`, `ON`, `OFF`, …) are written as
+  string literals in the control code; give them named constants in `denon_protocol.h`
+  next to the commands, so every protocol string lives in one file.
 
 ---
 

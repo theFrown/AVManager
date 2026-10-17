@@ -58,7 +58,7 @@ struct DenonState {
 
 class AVRHandler {
 public:
-    explicit AVRHandler(std::function<bool(std::string_view)> log, 
+    explicit AVRHandler(std::function<bool(std::string_view)> log, std::string_view ip_address, 
                         Verbosity verbosity = Verbosity::Info);
     ~AVRHandler();
     AVRHandler(const AVRHandler&) = delete;
@@ -86,7 +86,6 @@ private:
     enum class Waker_ { ComsReady, WindowMessageIn, TimeOut, Failed, Unknown };
     enum class ControlMode_ { Request, Report, Rest };
     
-    constexpr static const char* ip_string_ = "192.168.1.200";
     constexpr static int port_ = 23;
     constexpr static size_t inbufferlen_ = 270; //2x denon message max size (135 chars)
     constexpr static int heartbeat_interval_ = 1000;
@@ -100,8 +99,9 @@ private:
     Timer command_cooldown_{50};
     Timer response_deadline_{200};
     
-    Verbosity verbosity_;   //constructor initializer list
-    std::function<bool(std::string_view)> log_; //constructor initializer list
+    //variables initialized through the constructor initializer list
+    std::function<bool(std::string_view)> log_;
+    Verbosity verbosity_;
 
     std::array<char, inbufferlen_ + 1> inbuffer_ = {};
     std::string inchain_;
@@ -126,8 +126,9 @@ private:
     Report_ ControlReceive(int time_out_ms = 0);
     Waker_  ControlSleep(int ms);
     Report_ SyncKeyHook(bool flush = false);
-    int     SyncKeys(KeyStates&);
+    int     SyncKeys(KeyStates& keys);
     bool    SyncVolumeKey(int steps, int& stored_value, int min, int max);
+    int     SyncMuteKeys(KeyStates& keys);
     Report_ SyncIn();
     Report_ SyncInChanvols(std::string_view message);
     Report_ SyncInString(std::string_view message, std::string_view prefix, 
@@ -138,7 +139,8 @@ private:
     Report_ SyncOutChanvols();
     Report_ SyncOutDb(const std::string& prefix, int value, int& slot);
     Report_ SyncResolve();
-    Report_ SetupSocket();
+    void    SyncRest(Verbosity level);
+    Report_ SetupSocket(std::string_view ip_address);
     Report_ Connect();
     Report_ Receive();
     Report_ Parse();

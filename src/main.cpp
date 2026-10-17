@@ -5,11 +5,14 @@
 #include "timing.h"
 #include "logger.h"
 
-int main() {
+int main(int argc, char* argv[]) {
 
     #ifndef NDEBUG
     std::cout << std::unitbuf;
     #endif
+
+    std::string ip_address_string = (argc < 2) ? "192.168.1.200" : argv[1];
+    if (argc > 2) std::cout << "Note: command line arguments beyond the first are ignored!\n";
 
     std::cout << "Logger starting\n";
     Logger log;
@@ -22,7 +25,7 @@ int main() {
     {
         auto log_lambda = [&log](std::string_view message) -> bool { return log.Log(message); };
         log.Log("AVManager starting");
-        AVRHandler avr{log_lambda, Verbosity::Trace};
+        AVRHandler avr{log_lambda, ip_address_string, Verbosity::Info};
         AVRHandler::CtorCode avr_status = avr.GetCtorStatus();
         if (avr_status != AVRHandler::CtorCode::Healthy) {
             log.Log(std::format("[ERROR] AVRHandler creation failed with error code: {}",

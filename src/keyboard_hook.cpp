@@ -178,21 +178,11 @@ LRESULT CALLBACK KeyboardHook::ProcessKeys(int nCode, WPARAM wParam, LPARAM lPar
                     ping_key_status_.store(PingStatus::Received);
                     return swallow_key_value_;
                 }
-                else if (!shiftdown) {
-                    if (keydown) {
-                        if (ctrldown && altdown) {
-                            MessageBeep(0xFFFFFFFF); //audible version of Ping
-                            return swallow_key_value_; 
-                        }
-                        raw_keys.mute.counter++;
-                        raw_keys.mute.isdown.store(true);
-                    }
-                    else {
-                        if (ctrldown && altdown) {
-                            return swallow_key_value_; 
-                        }
-                        raw_keys.mute.isdown.store(false);
-                    }
+                else if (ctrldown && altdown && !shiftdown) {
+                    if (keydown) MessageBeep(0xFFFFFFFF); //audible version of Ping
+                    return swallow_key_value_; //passing to Windows or AVR would mask the Ping
+                }
+                else if (ProcessCombo(raw_keys.mute, keydown, ctrldown, altdown, shiftdown)) {
                     WakeListener();
                     return swallow_key_value_;
                 }
@@ -293,11 +283,13 @@ void KeyboardHook::PrintStates() const {
     std::cout << std::format("bare |  {:d}  - {: >3} |  {:d}  - {: >3} |  {:d}  - {: >3} |\n", 
                              keystates.vup.bare.isdown.load(), keystates.vup.bare.counter.load(),
                              keystates.vdown.bare.isdown.load(), keystates.vdown.bare.counter.load(),
-                             keystates.mute.isdown.load(), keystates.mute.counter.load());
-    std::cout << std::format("ctrl |  {:d}  - {: >3} |  {:d}  - {: >3} |     -     |\n", 
+                             keystates.mute.bare.isdown.load(), keystates.mute.bare.counter.load());
+    std::cout << std::format("ctrl |  {:d}  - {: >3} |  {:d}  - {: >3} |  {:d}  - {: >3} |\n", 
                              keystates.vup.ctrl.isdown.load(), keystates.vup.ctrl.counter.load(),
-                             keystates.vdown.ctrl.isdown.load(), keystates.vdown.ctrl.counter.load());
-    std::cout << std::format("alt  |  {:d}  - {: >3} |  {:d}  - {: >3} |     -     |\n", 
+                             keystates.vdown.ctrl.isdown.load(), keystates.vdown.ctrl.counter.load(),
+                             keystates.mute.ctrl.isdown.load(), keystates.mute.ctrl.counter.load());
+    std::cout << std::format("alt  |  {:d}  - {: >3} |  {:d}  - {: >3} |  {:d}  - {: >3} |\n", 
                              keystates.vup.alt.isdown.load(), keystates.vup.alt.counter.load(),
-                             keystates.vdown.alt.isdown.load(), keystates.vdown.alt.counter.load());
+                             keystates.vdown.alt.isdown.load(), keystates.vdown.alt.counter.load(),
+                             keystates.mute.alt.isdown.load(), keystates.mute.alt.counter.load());
 }

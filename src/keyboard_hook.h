@@ -18,7 +18,7 @@ struct KeyStates {
     };
     Combos vup;
     Combos vdown;
-    State mute;
+    Combos mute;
     Stopwatch processing_delay{false};
     std::atomic<bool> quit = false;
 };

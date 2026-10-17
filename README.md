@@ -20,7 +20,9 @@ All of that will be addressed by this program:
 A secondary goal in parallel to those above is for me to expand my knowledge of C++, Windows programming, Git, CMake, and any other tools that are relevant. So far I haven't added any tools inside the codebase just for the sake of it, but I will soon start playing with a basic CI/CD flow to learn the basics.
 
 [^1]: The Denon needs line of sight and my plants keep shifting to hide the sensor. For the best audio quality, you want Windows at 100% volume and rely entirely on the Denon to control the actual sound level.
+
 [^2]: I haven't found a version of the protocol for the X3800H formally published by Denon, I used the one I found here: [avsforum.com](https://www.avsforum.com/threads/denon-ip-and-rs232-commands-dennon-x3700h-x3800h-2021-2022.3290782/)
+
 [^3]: Before I bought the AVR, I needed Dolby Access even to get 5.1 over HDMI, and from that time I know that the link between the PC and the LG and from the LG to the decoder is extremely unreliable, audio drop-outs, buzzing, stuck in stereo, etc. That is why I chose to only use Dolby Access when it is needed. Low priority since I don't have height speakers yet.
 
 ## Status
@@ -32,7 +34,8 @@ The repo includes a dedicated [roadmap](ROADMAP.md) with more detail, but the sh
 | Talking to the Denon | ✅ working |
 | Intercepting keys | ✅ working |
 | Using Modifiers | ✅ working |
-| Linking state machine | 🚧 WIP |
+| Linking state machine | ✅/🚧 works, but being improved |
+| Making it run as a background process | 🚧 WIP |
 | OSD | ⬜ not yet started |
 
 | 1B: Audio format syncing and auto-switching | status |
@@ -44,10 +47,10 @@ The repo includes a dedicated [roadmap](ROADMAP.md) with more detail, but the sh
 
 | Currently working on |
 |---|
-| cleaning up control logic |
-| splitting out test scaffolding into a basic CI flow |
-| splitting class structure to smaller classes |
-| (automated) test infrastructure |
+| unit tests with GoogleTest and CI on GitHub Actions |
+| thread-safe logging so the `KeyboardHook` can log too |
+| splitting `AVRHandler` into smaller classes |
+| add automated tests against simulated receiver, possibly keyboard hook |
 
 ## How it works
 
@@ -77,9 +80,9 @@ The repo includes a dedicated [roadmap](ROADMAP.md) with more detail, but the sh
 More to follow!
 
 ## Building
-Coming soon! 
 
-*the current main() runs through test scaffolding and includes a lot of logging, so in its current state it is not yet ready to be run as a background process as intended. I will work on this soon and then provide build instructions (see [roadmap](ROADMAP.md)).*
+See dedicated [building file](BUILDING.md) for instructions on not just building but also how to set
+up the AVR, and how to use the program.
 
 ## How this was written
 
