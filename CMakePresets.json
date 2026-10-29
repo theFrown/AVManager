@@ -7,7 +7,8 @@
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build/${presetName}",
             "architecture": { "value": "x64", "strategy": "external" },
-            "cacheVariables": { 
+            "toolset": { "value": "host=x64", "strategy": "external" },
+            "cacheVariables": {
                 "CMAKE_CXX_COMPILER": "cl.exe",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
             }
@@ -17,14 +18,28 @@
             "inherits": "windows-msvc",
             "displayName": "Debug",
             "description": "Default build using Ninja in Windows in debug mode",
-            "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug"}
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "BUILD_TESTING": "OFF" }
         },
         {
             "name": "windows-release",
             "inherits": "windows-msvc",
             "displayName": "Release",
             "description": "Release build using Ninja on Windows in release mode",
-            "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "BUILD_TESTING": "OFF" }
+        },
+        {
+            "name": "windows-test-debug",
+            "inherits": "windows-msvc",
+            "displayName": "Test-Debug",
+            "description": "Test build using Ninja on Windows in debug mode",
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "BUILD_TESTING": "ON" }
+        },
+        {
+            "name": "windows-test-release",
+            "inherits": "windows-msvc",
+            "displayName": "Test-Release",
+            "description": "Test build using Ninja on Windows in release mode",
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "BUILD_TESTING": "ON" }
         }
     ],
     "buildPresets": [
@@ -35,6 +50,28 @@
         {
             "name": "windows-release",
             "configurePreset": "windows-release"
-        }        
+        },
+        {
+            "name": "windows-test-debug",
+            "configurePreset": "windows-test-debug"
+        },
+        {
+            "name": "windows-test-release",
+            "configurePreset": "windows-test-release"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "windows-test-debug",
+            "configurePreset": "windows-test-debug",
+            "output": {"outputOnFailure": true},
+            "execution": {"noTestsAction": "error"}
+        },
+        {
+            "name": "windows-test-release",
+            "configurePreset": "windows-test-release",
+            "output": {"outputOnFailure": true},
+            "execution": {"noTestsAction": "error"}
+        }
     ]
 }
