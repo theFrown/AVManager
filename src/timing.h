@@ -15,7 +15,7 @@ private:
     std::optional<Clock_::time_point> deadline_;
 
 public:
-    explicit Timer(int ms = 0, bool set_now = false) : default_period_(ms) { 
+    explicit Timer(int ms = 0, bool set_now = false) : default_period_(ms) {
         if (set_now) Set(ms);
     }
 
@@ -37,9 +37,9 @@ public:
 
 class Stopwatch {
 /*
-Most methods take a single optional argument 'bool reset', which defaults to false. When set 
-to true the method will switch out the atomic operation used for the base function of the 
-method to an operation that combines that original function with reseting the timer value. 
+Most methods take a single optional argument 'bool reset', which defaults to false. When set
+to true the method will switch out the atomic operation used for the base function of the
+method to an operation that combines that original function with reseting the timer value.
 Exceptions: the constructor, where reset doesn't make sense, and Reset() itself.
 */
 private:

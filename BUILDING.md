@@ -20,8 +20,8 @@ git clone https://github.com/theFrown/AVManager
 ## Building
 ### From the command line
 
-1. Open an x64 Native Tools prompt (easiest way is to open start menu and search for 
-`x64 Native Tools Command Prompt for VS 2022` or if you know where to find it run Visual Studio's 
+1. Open an x64 Native Tools prompt (easiest way is to open start menu and search for
+`x64 Native Tools Command Prompt for VS 2022` or if you know where to find it run Visual Studio's
 `vcvars64.bat`) and navigate to the cloned repo.
 2. configure the CMake preset:
 ```
@@ -68,18 +68,18 @@ this, be sure to set it to a value outside the router's DHCP range to avoid conf
 - IPv4 address of the AVR in your network added through input argument, either:
   - run with command line argument with format `x.x.x.x`, e.g. `192.168.1.2`
   - make a shortcut and change the Target: `...\AVManager.exe xxx.xxx.xxx.xxx`
-  
+
   without an argument it runs the default IP address `192.168.1.200`
 
 ### Optional but useful modifications to the source code
 - global verbosity level: in `main.cpp` change the constructor argument of `AVRHandler` to the desired
 level (e.g. `AVRHandler avr{..., Verbosity::Info};`)
   - options in order of verbosity: `Silent`, `Error`, `Warning`, `Info`, `Debug`, `Trace`
-- log file location `portable` yes/no: in `main.cpp` change the argument for `log.Start(...);` to 
+- log file location `portable` yes/no: in `main.cpp` change the argument for `log.Start(...);` to
 true/false respectively.
   - `true`: logs are stored in a `logs` folder relative to the location of `AVManager.exe`
   - `false`: logs are stored in `%LOCALAPPDATA%`, i.e. `C:\Users\<username>\AppData\Local\AVManager\logs`
-- the increment of one button press: `volume_step_` in `avr_handler.h` should be set to match the 
+- the increment of one button press: `volume_step_` in `avr_handler.h` should be set to match the
 setting in the AVR. I've got it set to 5, because my AVR is set to 0.5 dB increments.
 
 ## Running
@@ -96,78 +96,78 @@ Run `AVManager.exe` from the command line, from explorer directly or through a s
 the Windows volume untouched
 - The volume keys will have different effects on different speaker groups depending on which
 modifiers are used:
-  - `without modifier`: **Main Volume**, will control the AVR the exact same way as when you press 
+  - `without modifier`: **Main Volume**, will control the AVR the exact same way as when you press
   the associated button on the AVR's remote.
-    - `Volume Up` and `Volume Down`: each press increases/decreases the main volume by either 
+    - `Volume Up` and `Volume Down`: each press increases/decreases the main volume by either
     0.5 dB or 1 dB depending on AVR settings and `volume_step_`. *Note: if the code hangs and finds many volume up
     presses it will cap the number to 10 presses to protect eardrums and speakers.*
-    - `Mute`: will either fully mute the main volume or toggle -40 dB depending on how you set it 
-    up on the AVR. *Note: if the code hangs and finds multiple presses when it resumes, it will 
+    - `Mute`: will either fully mute the main volume or toggle -40 dB depending on how you set it
+    up on the AVR. *Note: if the code hangs and finds multiple presses when it resumes, it will
     assume "Mute On" was intended.*
   - `Ctrl`: **Center Channel**, will set the relative volume of the center channel as an offset
   to the main volume, use to calibrate dialogue.
     - `Volume Up` and `Volume Down`: will increase/decrease the speaker level of the center channel
     relative to the main volume.
-    - `Mute`: will reset the center channel offset back to 0 relative to the main volume. Repeat 
+    - `Mute`: will reset the center channel offset back to 0 relative to the main volume. Repeat
     presses are ignored.
   - `Alt`: **Surround Channels**, will set the relative volume of both the Surround Left
-  and Surround Right channels as an offset to the main volume. Use to calibrate surround effects. 
+  and Surround Right channels as an offset to the main volume. Use to calibrate surround effects.
   (does not yet control sides or height channels, see Known Issues).
-    - `Volume Up` and `Volume Down`: will increase/decrease the speaker level of the surround 
+    - `Volume Up` and `Volume Down`: will increase/decrease the speaker level of the surround
     channels relative to the main volume.
-    - `mute`: will reset the surround channel offset back to 0 relative to the main volume. Repeat 
+    - `mute`: will reset the surround channel offset back to 0 relative to the main volume. Repeat
     presses are ignored.
   - `Shift`: **Windows Volume**, will pass the keys through to Windows unchanged
-    - `Volume Up` and `Volume Down`: will increase/decrease the Windows volume (keep this at 100% 
+    - `Volume Up` and `Volume Down`: will increase/decrease the Windows volume (keep this at 100%
     for best audio quality!).
     - `Mute`: will mute/unmute Windows.
   - `Ctrl`\+`Alt`: **Special Commands**
-    - `Mute`: **Audio Cue**, has no effect on volume but plays an audible \**ding*\* as an easy way 
+    - `Mute`: **Audio Cue**, has no effect on volume but plays an audible \**ding*\* as an easy way
     to check/signal that the keyhook is working well without opening consoles or logs.
     - `End`: **Exit Program**, gracefully closes all logs and connections and closes.
-  - `any other combination of modifiers`: **Main Volume**, conflicting modifiers are ignored and 
+  - `any other combination of modifiers`: **Main Volume**, conflicting modifiers are ignored and
     sent to the AVR main volume instead.
 
 [^1]: Some fancier keyboards have custom key handling for non-standard keys through their drivers
-before Windows sees them. If that is the case, the key might bypass my keyboard hook entirely. 
-I am currently not sure if this can be helped and would probably recommend mapping other keys 
-that this keyboard has to the same functionalities. 
+before Windows sees them. If that is the case, the key might bypass my keyboard hook entirely.
+I am currently not sure if this can be helped and would probably recommend mapping other keys
+that this keyboard has to the same functionalities.
 
 ### To close the program
-The preferred method is `Ctrl`+`Alt`+`End`, this asks the program to close nicely and wrap 
-up logs etc neatly. 
+The preferred method is `Ctrl`+`Alt`+`End`, this asks the program to close nicely and wrap
+up logs etc neatly.
 
 It is technically possible to just close the console window, but this leaves
 clean-up up to Windows **and leaves logs looking like a crash**. The latter is relevant because
-I will add checks in the future for crashes based on the fact that the previous logs lack their 
+I will add checks in the future for crashes based on the fact that the previous logs lack their
 wrap-up lines.
 
 ## Known issues
 - Surround currently only affects 5.1 channels, so 7.1, 5.1.4, etc will only have the Surround Left
 and Surround Right respond to `Alt` + `volume up/down`. Fixing this without unnecessary network
-traffic requires knowing what speaker channels are hooked up and used, which is related to 
+traffic requires knowing what speaker channels are hooked up and used, which is related to
 [roadmap item 40](ROADMAP.md) and is not scheduled any time soon unless you ask me to bump it up.
 - Log files are not capped in either length or number. If it runs for weeks, it will become long,
-if you run it many times, you will have equally many logs. Fixing it is 
+if you run it many times, you will have equally many logs. Fixing it is
 [roadmap item 52](ROADMAP.md), targeted for short term.
-- Will often shut itself down after a Windows sleep-wake cycle. Being investigated as 
+- Will often shut itself down after a Windows sleep-wake cycle. Being investigated as
 [roadmap item 60](ROADMAP.md).
-- May complain and resync when the AVR power-cycles. This happens because the AVR reports a 
-***bunch*** of messages when it power-cycles and if you press a volume key in that ~10 second 
-window AVManager might interpret the stream of messages as a sign the AVR is not listening to its 
+- May complain and resync when the AVR power-cycles. This happens because the AVR reports a
+***bunch*** of messages when it power-cycles and if you press a volume key in that ~10 second
+window AVManager might interpret the stream of messages as a sign the AVR is not listening to its
 commands. It should be harmless in effect, just some unnecessary network traffic and logging. To
-avoid it, whenever you reboot the AVR, give it some time to stop sending out messages before 
+avoid it, whenever you reboot the AVR, give it some time to stop sending out messages before
 sending commands if you want to be sure. At least wait until the AVR power LED stops blinking
 and the display shows the correct audio mode. Investigated in [roadmap item 61](ROADMAP.md).
 - "Feature X is not in yet": see the [roadmap](ROADMAP.md) for features that should work now, what to
 expect near-term and what to expect long-term.
-- No modifier for subwoofer(s). I have not felt the need to control mine despite daily use of the 
+- No modifier for subwoofer(s). I have not felt the need to control mine despite daily use of the
 AVR for varied media sources, so I'm not planning on adding it :).
 
 
 ## Troubleshooting
 In general the program is fairly verbose when it comes to errors and warnings. Pretty much any
-function that can fail will report why it fails as either an [ERROR] or a [WARNING] message. 
+function that can fail will report why it fails as either an [ERROR] or a [WARNING] message.
 Always read through the logs to get more information on what might be wrong.
 
 In particular, check whether or not the log ends with `===== end of log =====` on its own line:

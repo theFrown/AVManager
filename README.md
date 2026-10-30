@@ -54,9 +54,9 @@ The repo includes a dedicated [roadmap](ROADMAP.md) with more detail, but the sh
 
 ## How it works
 
-- `KeyboardHook` (keyboard_hook.h/.cpp) registers a low level hook in a dedicated thread, which runs a blocking message loop such that Windows runs its callback (`ProcessKeys`) on any keystroke. The callback reads the keys and usually passes them straight through to Windows, unless they are key-downs or key-ups for volume up, down and mute. 
+- `KeyboardHook` (keyboard_hook.h/.cpp) registers a low level hook in a dedicated thread, which runs a blocking message loop such that Windows runs its callback (`ProcessKeys`) on any keystroke. The callback reads the keys and usually passes them straight through to Windows, unless they are key-downs or key-ups for volume up, down and mute.
   - ***Returning immediately is critical for gaming input latency***, returning fast is critical to not be annoying in general, and Windows might even drop our hook after 300 ms delay in handling the keystroke. (not observed in testing)
-- volume up, down and mute are stored in the `KeyStates` struct atomically (in separate members for the different modifiers), and a thread message is sent (if a listener's thread ID has been registered). 
+- volume up, down and mute are stored in the `KeyStates` struct atomically (in separate members for the different modifiers), and a thread message is sent (if a listener's thread ID has been registered).
 - Modifiers (ctrl, alt, shift) are stored separately in order to direct keypresses to the right member of the struct. This is essential for ctrl+alt edge cases. With shift as modifier the volume keys *are* passed to Windows.
 - `AVRHandler` (avr_handler.h/.cpp) creates a winsock2 socket, opens the connection to the Denon and manages sending, receiving and any errors and edge cases arising from it.
 - denon_protocol.h contains the relevant commands and formats of expected responses from the Denon
@@ -72,7 +72,7 @@ The repo includes a dedicated [roadmap](ROADMAP.md) with more detail, but the sh
   - resyncs all parameters from the Denon if it suspects we have missed messages (commands keep failing)
   - goes to sleep until:
     - `command_cooldown_` is over (i.e. we can send new commands)
-    - when `response_deadline_` is over (i.e. we can check if we're synced up) 
+    - when `response_deadline_` is over (i.e. we can check if we're synced up)
     - after a heartbeat period (currently 1 s, tbd)
     - the socket reports an incoming message from the Denon
     - the `KeyboardHook` sends a thread message (or anyone else does)
@@ -86,12 +86,12 @@ up the AVR, and how to use the program.
 
 ## How this was written
 
-I'm learning C++ and Windows programming through this project, and all code here is written by me. I use Claude (via Claude Code) as a **tutor**: 
+I'm learning C++ and Windows programming through this project, and all code here is written by me. I use Claude (via Claude Code) as a **tutor**:
 
-- to discuss design decisions ("This feels a bit Pythonic, how would a seasoned C++ developer approach it?"), 
-- to check assumptions ("Can we rely on this Windows API returning X even if Y?"), 
-- to learn under-the-hood fundamentals ("Will using a local here cost me more cycles than having a persistent class member?"), 
-- and to review my changes before I commit them. 
+- to discuss design decisions ("This feels a bit Pythonic, how would a seasoned C++ developer approach it?"),
+- to check assumptions ("Can we rely on this Windows API returning X even if Y?"),
+- to learn under-the-hood fundamentals ("Will using a local here cost me more cycles than having a persistent class member?"),
+- and to review my changes before I commit them.
 
 I wrote this Readme and most commit messages and had Claude review them and make suggestions. For some commit messages and the roadmap I let Claude draft it first based on the ongoing discussion, and the Roadmap is almost entirely maintained by Claude.
 

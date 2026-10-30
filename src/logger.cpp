@@ -90,7 +90,7 @@ bool Logger::MakeFolderPath(bool portable) {
     std::filesystem::create_directories(folder_path_, ec);
     if (ec) {
         Write(std::cerr, std::format("[ERROR] Logger failed to create/find the log folder:\n    {}"
-                                     "\n    with error code: {} and error message: {}", 
+                                     "\n    with error code: {} and error message: {}",
                                      folder_path_.string(), ec.value(), ec.message()), Timestamp{});
         folder_path_.clear();
         return false;
@@ -102,7 +102,7 @@ bool Logger::MakeFolderPath(bool portable) {
 std::filesystem::path Logger::GetExecutablePath() {
     std::filesystem::path file_path;
     const DWORD pathsize = 300;
-    wchar_t filepath_array[pathsize]; 
+    wchar_t filepath_array[pathsize];
     DWORD returnsize = GetModuleFileNameW(nullptr, filepath_array, pathsize);
     if ((returnsize == 0) || (returnsize == pathsize)) {
         DWORD error = GetLastError();
@@ -125,7 +125,7 @@ std::filesystem::path Logger::GetLocalAppdataPath() {
         Write(std::cerr, std::format("[ERROR] Failed to retrieve path to Local Appdata with error: "
                                      "{:#x}", static_cast<unsigned long>(result)), Timestamp{});
         return {};
-    } 
+    }
     return std::filesystem::path(managed_string.get());
 }
 
@@ -142,7 +142,7 @@ bool Logger::CreateLog() {
                   Timestamp{});
             return false;
         }
-        file_path = folder_path_ / std::format(log_file_format_, date_time, 
+        file_path = folder_path_ / std::format(log_file_format_, date_time,
                                                std::format("_{:03d}", i));
         available = CreateFileIfNew(file_path);
     }
@@ -157,7 +157,7 @@ bool Logger::CreateLog() {
 }
 
 bool Logger::CreateFileIfNew(const std::filesystem::path& path) {
-    HANDLE windows_file_handle = CreateFileW(path.wstring().c_str(), GENERIC_WRITE, 0, nullptr, 
+    HANDLE windows_file_handle = CreateFileW(path.wstring().c_str(), GENERIC_WRITE, 0, nullptr,
                                              CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (windows_file_handle == INVALID_HANDLE_VALUE) {
         DWORD error = GetLastError();
@@ -167,7 +167,7 @@ bool Logger::CreateFileIfNew(const std::filesystem::path& path) {
         }
         else {
             Write(std::cerr, std::format("[ERROR] Logger could not create file with name:\n    {}\n"
-                                         "    with error: {}", path.string(), error), 
+                                         "    with error: {}", path.string(), error),
                                          Timestamp{});
         }
         return false;

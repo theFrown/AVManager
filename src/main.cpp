@@ -21,7 +21,7 @@ int main(int argc, char* argv[]) {
         std::cerr << "[ERROR] Logger failed to start with error code: " << response << "\n";
         return 1;
     }
-    
+
     {
         auto log_lambda = [&log](std::string_view message) -> bool { return log.Log(message); };
         log.Log("AVManager starting");
@@ -39,7 +39,7 @@ int main(int argc, char* argv[]) {
         if (response != 0) {
             log.Log("[ERROR] KeyboardHook failed to start");
             return 3;
-        }   
+        }
 
         log.Log("Main loop starting\n=============================================\n ");
         AVRHandler::ExitCode exitcode = avr.ControlLoop();
@@ -47,7 +47,7 @@ int main(int argc, char* argv[]) {
         log.Log("Main loop ended");
         keyhook.Stop();
         if ((exitcode != AVRHandler::ExitCode::Normal) && (exitcode != AVRHandler::ExitCode::Commanded)) {
-            log.Log(std::format("[ERROR] Main loop ended uncommanded with error: {}", 
+            log.Log(std::format("[ERROR] Main loop ended uncommanded with error: {}",
                     static_cast<int>(exitcode)));
             return 4;
         }

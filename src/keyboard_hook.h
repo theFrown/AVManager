@@ -41,7 +41,7 @@ public:
         bool primary_ = false;
 
     public:
-        KeyListener() {   
+        KeyListener() {
             MSG msg = {};
             PeekMessage(&msg, NULL, WM_USER, WM_USER, PM_NOREMOVE);
             DWORD expected = 0;
@@ -69,8 +69,8 @@ public:
     PingStatus GetClearPingKeyStatus() { return ping_key_status_.exchange(PingStatus::Unknown); }
     PingStatus GetPingMsgStatus() const { return ping_msg_status_.load(); }
     PingStatus GetClearPingMsgStatus() { return ping_msg_status_.exchange(PingStatus::Unknown); }
-    static std::optional<DWORD> GetError(bool reset = false) { 
-        if (reset) return listener_last_error_.exchange(std::nullopt); 
+    static std::optional<DWORD> GetError(bool reset = false) {
+        if (reset) return listener_last_error_.exchange(std::nullopt);
         else return listener_last_error_.load();
     }
 
