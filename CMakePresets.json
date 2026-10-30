@@ -7,7 +7,7 @@
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build/${presetName}",
             "architecture": { "value": "x64", "strategy": "external" },
-            "cacheVariables": { 
+            "cacheVariables": {
                 "CMAKE_CXX_COMPILER": "cl.exe",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
             }
@@ -35,6 +35,6 @@
         {
             "name": "windows-release",
             "configurePreset": "windows-release"
-        }        
+        }
     ]
 }

@@ -16,7 +16,7 @@ namespace denon_cmd {
     constexpr const char* mute_status = "MU?";
     constexpr const char* mute_on     = "MUON";
     constexpr const char* mute_off    = "MUOFF";
-    
+
     constexpr const char* chanvol_prefix    = "CV";
     constexpr const char* chanvol_status    = "CV?";
     constexpr const char* chanvol_endreport = "CVEND";
@@ -30,7 +30,7 @@ namespace denon_cmd {
     constexpr const char* input_prefix = "SI";
     constexpr const char* input_status = "SI?";
     constexpr const char* input_TV     = "SITV";
-    
+
     constexpr const char* surround_prefix = "MS";
     constexpr const char* surround_status = "MS?";
     constexpr const char* surround_matrix = "MSMATRIX";
@@ -49,7 +49,7 @@ namespace denon_cmd {
     OPALSDSP ON|
     OPALSVAL 000|
     SYSDA PCM                  |
-    
+
     example responses to "MS?|":
     MS MULTI CH IN|
     PSDRC OFF|

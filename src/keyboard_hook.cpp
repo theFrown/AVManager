@@ -13,7 +13,7 @@ KeyboardHook::~KeyboardHook() {
 
 bool KeyboardHook::Start() {
     if (worker_status_.load() != WorkerStatus::PreStart) {
-        std::cerr << "[ERROR] KeyboardHook tried to start a worker but already owns one!\n"; 
+        std::cerr << "[ERROR] KeyboardHook tried to start a worker but already owns one!\n";
         return false;
     }
     worker_ = std::thread(&KeyboardHook::Run, this);
@@ -122,7 +122,7 @@ bool KeyboardHook::Unhook(HHOOK handle) {
         DWORD response = GetLastError();
         std::cerr << std::format("[ERROR] KeyboardHook failed to unhook with error: {}\n", response);
         std::cerr << "    KeyboardHook will remain occupied to prevent stale hooks\n";
-        hook_status_.store(HookStatus::Error); //do not restore! signal to resolve stale hooks 
+        hook_status_.store(HookStatus::Error); //do not restore! signal to resolve stale hooks
         return false;
     }
     hook_status_.store(HookStatus::Uninitialized);
@@ -133,7 +133,7 @@ LRESULT CALLBACK KeyboardHook::ProcessKeys(int nCode, WPARAM wParam, LPARAM lPar
     if (nCode >= 0) {
         const KBDLLHOOKSTRUCT& key_message = *reinterpret_cast<KBDLLHOOKSTRUCT*>(lParam);
         bool keydown = (wParam == WM_KEYDOWN) || (wParam == WM_SYSKEYDOWN);
-        
+
         switch (key_message.vkCode) {       // phase 1: handle any modifier
             case VK_LCONTROL: case VK_RCONTROL: case VK_CONTROL:
                 ctrl_down_.store(keydown);
@@ -239,7 +239,7 @@ void KeyboardHook::WakeListener() {
 
 bool KeyboardHook::PingKey() {
     PingStatus baseline = PingStatus::Unknown;
-    ping_key_status_.store(baseline); 
+    ping_key_status_.store(baseline);
     INPUT input = {};
     input.type = INPUT_KEYBOARD;
     input.ki.wVk = VK_VOLUME_MUTE;
@@ -261,7 +261,7 @@ bool KeyboardHook::PingKey() {
 
 bool KeyboardHook::PingMsg() {
     PingStatus baseline = PingStatus::Unknown;
-    ping_msg_status_.store(baseline); 
+    ping_msg_status_.store(baseline);
     bool response = PostThreadMessage(worker_thread_id_.load(), WM_APP + ping_message_number_, 0, 0);
     if (response) {
         ping_msg_status_.compare_exchange_strong(baseline, PingStatus::Sent);
@@ -272,7 +272,7 @@ bool KeyboardHook::PingMsg() {
         DWORD error = GetLastError();
         std::cerr << std::format("[WARNING] KeyboardHook failed to send Ping thread message with "
                                  "error: {}\n", error);
-        return false;        
+        return false;
     }
 }
 
@@ -280,15 +280,15 @@ void KeyboardHook::PrintStates() const {
     const KeyStates& keystates = raw_keys;
     std::cout << "     |    vup    |   vdown   |   mute    |\n";
     std::cout << "     | dwn - cnt | dwn - cnt | dwn - cnt |\n";
-    std::cout << std::format("bare |  {:d}  - {: >3} |  {:d}  - {: >3} |  {:d}  - {: >3} |\n", 
+    std::cout << std::format("bare |  {:d}  - {: >3} |  {:d}  - {: >3} |  {:d}  - {: >3} |\n",
                              keystates.vup.bare.isdown.load(), keystates.vup.bare.counter.load(),
                              keystates.vdown.bare.isdown.load(), keystates.vdown.bare.counter.load(),
                              keystates.mute.bare.isdown.load(), keystates.mute.bare.counter.load());
-    std::cout << std::format("ctrl |  {:d}  - {: >3} |  {:d}  - {: >3} |  {:d}  - {: >3} |\n", 
+    std::cout << std::format("ctrl |  {:d}  - {: >3} |  {:d}  - {: >3} |  {:d}  - {: >3} |\n",
                              keystates.vup.ctrl.isdown.load(), keystates.vup.ctrl.counter.load(),
                              keystates.vdown.ctrl.isdown.load(), keystates.vdown.ctrl.counter.load(),
                              keystates.mute.ctrl.isdown.load(), keystates.mute.ctrl.counter.load());
-    std::cout << std::format("alt  |  {:d}  - {: >3} |  {:d}  - {: >3} |  {:d}  - {: >3} |\n", 
+    std::cout << std::format("alt  |  {:d}  - {: >3} |  {:d}  - {: >3} |  {:d}  - {: >3} |\n",
                              keystates.vup.alt.isdown.load(), keystates.vup.alt.counter.load(),
                              keystates.vdown.alt.isdown.load(), keystates.vdown.alt.counter.load(),
                              keystates.mute.alt.isdown.load(), keystates.mute.alt.counter.load());

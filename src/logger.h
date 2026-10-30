@@ -35,6 +35,6 @@ private:
 
     bool MakeFolderPath(bool portable);
     bool CreateLog();
-    static bool Write(std::ostream& stream, std::string_view string, 
+    static bool Write(std::ostream& stream, std::string_view string,
                       std::optional<Timestamp> timestamp);
 };

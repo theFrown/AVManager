@@ -15,9 +15,9 @@
 #include "timing.h"
 
 AVRHandler::AVRHandler(std::function<bool(std::string_view)> log, std::string_view ip_address,
-                       Verbosity verbosity) 
+                       Verbosity verbosity)
     : log_(std::move(log)), verbosity_(verbosity)
-{   
+{
     Report_ response = SetupSocket(ip_address);
     if (response != Report_::OK) {
         ctor_status_ = CtorCode::SocketSetupFailed;
@@ -50,7 +50,7 @@ AVRHandler::~AVRHandler() {
                     listening = false;
                 }
                 else if (coms_response == Report_::SocketError) {
-                    Print("Connection error, forcing shutdown"); 
+                    Print("Connection error, forcing shutdown");
                     listening = false;
                 }
                 if (kill_deadline.IsExpired()) {
@@ -118,7 +118,7 @@ auto AVRHandler::ControlLoop() -> ExitCode {
         }
 
         //closing the loop: making sure commanded_ and reported_ reconcile
-        if (control_mode_ != ControlMode_::Rest) { 
+        if (control_mode_ != ControlMode_::Rest) {
             response = SyncResolve();
             if (response == Report_::Unknown) {
                 response = ControlResync();
@@ -165,7 +165,7 @@ auto AVRHandler::ControlPing(bool silent, bool block, int time_out) -> Report_ {
         while (!signal_received_) {
             if (deadline.IsExpired()) {
                 Print(Verbosity::Warning, "Polling the AVR timed out");
-                return Report_::NoData; 
+                return Report_::NoData;
             }
             int wait = deadline.GetRemaining().value_or(500);
             response = ControlReceive(wait);
@@ -186,7 +186,7 @@ auto AVRHandler::ControlResync() -> Report_ {
     int attempt = 1;
     bool sent = false;
     bool succeeded = false;
-    //TODO: might be smart to sleep for 'patience' ms (or more) to purge denon incoming messages 
+    //TODO: might be smart to sleep for 'patience' ms (or more) to purge denon incoming messages
     for (int stage = 0; stage < 6; stage++) {
         attempt = 1;
         sent = false;
@@ -249,7 +249,7 @@ auto AVRHandler::ControlResync() -> Report_ {
                     break;
                 }
                 else if (deadline.IsExpired()) {
-                    Print(Verbosity::Warning, std::format("Sync stage {} timed out", stage)); 
+                    Print(Verbosity::Warning, std::format("Sync stage {} timed out", stage));
                     sent = false;
                     attempt++;
                 }
@@ -359,7 +359,7 @@ auto AVRHandler::SyncKeyHook(bool flush) -> Report_ {
         }
         if (*delay > key_sync_warn_delay_) {
             Print(Verbosity::Warning, std::format("Key stroke processing delay exceeded perception "
-                                                  "threshold! delay was {}", *delay)); 
+                                                  "threshold! delay was {}", *delay));
         }
         else {
             Print(Verbosity::Debug, std::format("Key stroke processing delay was {}", *delay));
@@ -368,7 +368,7 @@ auto AVRHandler::SyncKeyHook(bool flush) -> Report_ {
     return Report_::OK; //only reports success, control_mode_ handles whether there was input
 }
 
-int AVRHandler::SyncKeys(KeyStates& keys) { 
+int AVRHandler::SyncKeys(KeyStates& keys) {
     int steps = keys.vup.bare.counter.exchange(0) - keys.vdown.bare.counter.exchange(0);
     if (steps > max_volume_increase_steps_) steps = max_volume_increase_steps_;
     int requests = SyncVolumeKey(steps, requested_.volume, min_volume_, reported_.maxvolume);
@@ -379,7 +379,7 @@ int AVRHandler::SyncKeys(KeyStates& keys) {
     steps = keys.vup.alt.counter.exchange(0) - keys.vdown.alt.counter.exchange(0);
     requests += SyncVolumeKey(steps, requested_.chanvol.SL, min_chanvol_, max_chanvol_);
     requests += SyncVolumeKey(steps, requested_.chanvol.SR, min_chanvol_, max_chanvol_);
-    
+
     requests += SyncMuteKeys(keys);
 
     return requests;
@@ -497,7 +497,7 @@ auto AVRHandler::SyncInChanvols(std::string_view message) -> Report_ {
     }
 }
 
-auto AVRHandler::SyncInString(std::string_view message, std::string_view prefix, 
+auto AVRHandler::SyncInString(std::string_view message, std::string_view prefix,
                               std::string_view report_string, std::string& report_slot) -> Report_ {
     std::string_view params = message.substr(prefix.size());
     Print(Verbosity::Debug, std::format("Denon reports {} set to {}", report_string, params));
@@ -514,7 +514,7 @@ auto AVRHandler::SyncInString(std::string_view message, std::string_view prefix,
     return Report_::OK;
 }
 
-auto AVRHandler::SyncInDb(std::string_view message, std::string_view prefix, 
+auto AVRHandler::SyncInDb(std::string_view message, std::string_view prefix,
                           std::string_view report_string, int& report_slot) -> Report_ {
     std::string_view params = message.substr(prefix.size());
     std::optional<int> num;
@@ -623,7 +623,7 @@ auto AVRHandler::SyncOutDb(const std::string& prefix, int value, int& slot) -> R
 
 auto AVRHandler::SyncResolve() -> Report_ {
     if (control_mode_ == ControlMode_::Request) {
-        if (command_cooldown_.IsPending() || response_deadline_.IsPending()) { 
+        if (command_cooldown_.IsPending() || response_deadline_.IsPending()) {
             return Report_::Wait;
         }
         else {
@@ -702,7 +702,7 @@ auto AVRHandler::SetupSocket(std::string_view ip_address) -> Report_ {
         }
         else {
             response = WSAGetLastError();
-            Print(Verbosity::Error, std::format("Failed to convert IP address with error: {}", 
+            Print(Verbosity::Error, std::format("Failed to convert IP address with error: {}",
                                                 response));
         }
         return Report_::BadInput;
@@ -710,10 +710,10 @@ auto AVRHandler::SetupSocket(std::string_view ip_address) -> Report_ {
     socket_event_ = WSACreateEvent();
     if (socket_event_ == WSA_INVALID_EVENT) {
         response = WSAGetLastError();
-        Print(Verbosity::Error, std::format("Failed to create socket event with error: {}", 
+        Print(Verbosity::Error, std::format("Failed to create socket event with error: {}",
                                             response));
         return Report_::SocketError;
-    }   
+    }
     return Report_::OK;
 }
 
@@ -737,7 +737,7 @@ auto AVRHandler::   Connect() -> Report_ {
                 Print(Verbosity::Error, "Connection unreachable, possibly wrong subnet");
                 break;
             default:
-                Print(Verbosity::Error, std::format("Failed to connect socket with error: {}", 
+                Print(Verbosity::Error, std::format("Failed to connect socket with error: {}",
                                                     response));
         }
         return Report_::SocketError;
@@ -747,7 +747,7 @@ auto AVRHandler::   Connect() -> Report_ {
         if (response == SOCKET_ERROR) {
             response = WSAGetLastError();
         }
-        Print(Verbosity::Error, std::format("Failed to bind socket to event with error: {}", 
+        Print(Verbosity::Error, std::format("Failed to bind socket to event with error: {}",
                                              response));
         return Report_::SocketError;
     }
@@ -762,7 +762,7 @@ auto AVRHandler::Receive() -> Report_ {
     if (event_healthy_) {
         if (!WSAResetEvent(socket_event_)) {
             response = WSAGetLastError();
-            Print(Verbosity::Error, std::format("Resetting socket event failed with error: {}", 
+            Print(Verbosity::Error, std::format("Resetting socket event failed with error: {}",
                                                 response));
             event_healthy_ = false;
         }
@@ -781,7 +781,7 @@ auto AVRHandler::Receive() -> Report_ {
             return Report_::SocketError;
         }
     }
-    else if (response == 0) { 
+    else if (response == 0) {
         if (connection_shutting_down_) {
             Print(Verbosity::Debug, "Connection shutdown confirmed by AVR");
         }
@@ -799,7 +799,7 @@ auto AVRHandler::Receive() -> Report_ {
         }
         inchain_.append(inbuffer_.data(), response);
         Print(Verbosity::Debug, std::format("Received following from AVR: [{}]\n    Full chain now "
-                                            "contains: [{}]", std::string_view(inbuffer_.data(), 
+                                            "contains: [{}]", std::string_view(inbuffer_.data(),
                                             response), inchain_));
         return Report_::Data;
     }
@@ -844,7 +844,7 @@ auto AVRHandler::Send(std::string_view cmd, bool wait) -> Report_ {
             Print(Verbosity::Warning, std::format("Tried to send command [{}] while in cooldown.",
                                                   cmd));
             return Report_::Wait;
-        }     
+        }
     }
     std::string full{cmd};
     full += '\r';
@@ -856,7 +856,7 @@ auto AVRHandler::Send(std::string_view cmd, bool wait) -> Report_ {
         Print(Verbosity::Warning, std::format("Failed to send command: [{}], with error: {}", cmd,
                                               response));
         connection_healthy_ = false;
-        return Report_::SocketError;        
+        return Report_::SocketError;
     }
     return Report_::OK;
 }
@@ -930,32 +930,32 @@ void AVRHandler::PrintStates(Verbosity level) {
     std::format_to(std::back_inserter(table), "    surround mode: | {: >{}} | {: >{}} | {: >{}}\n",
                    requested_.surround.substr(0, w1), w1, commanded_.surround.substr(0, w1),
                    w1, reported_.surround.substr(0, w1), w1);
-    std::format_to(std::back_inserter(table), "    mute:          | {: >{}} | {: >{}} | {: >{}}\n", 
+    std::format_to(std::back_inserter(table), "    mute:          | {: >{}} | {: >{}} | {: >{}}\n",
                    requested_.mute.substr(0, w1), w1, commanded_.mute.substr(0, w1), w1,
                    reported_.mute.substr(0, w1), w1);
-    std::format_to(std::back_inserter(table), "    volume:        | {} | {} | {}\n", 
-                   FormatDb(requested_.volume, w2), FormatDb(commanded_.volume, w2), 
+    std::format_to(std::back_inserter(table), "    volume:        | {} | {} | {}\n",
+                   FormatDb(requested_.volume, w2), FormatDb(commanded_.volume, w2),
                    FormatDb(reported_.volume, w2));
-    std::format_to(std::back_inserter(table), "    maxvolume:     | {} | {} | {}\n", 
-                   FormatDb(requested_.maxvolume, w2), FormatDb(commanded_.maxvolume, w2), 
+    std::format_to(std::back_inserter(table), "    maxvolume:     | {} | {} | {}\n",
+                   FormatDb(requested_.maxvolume, w2), FormatDb(commanded_.maxvolume, w2),
                    FormatDb(reported_.maxvolume, w2));
-    std::format_to(std::back_inserter(table), "    chanvol FL:    | {} | {} | {}\n", 
-                   FormatDb(requested_.chanvol.FL, w2), FormatDb(commanded_.chanvol.FL, w2), 
+    std::format_to(std::back_inserter(table), "    chanvol FL:    | {} | {} | {}\n",
+                   FormatDb(requested_.chanvol.FL, w2), FormatDb(commanded_.chanvol.FL, w2),
                    FormatDb(reported_.chanvol.FL, w2));
-    std::format_to(std::back_inserter(table), "    chanvol FR:    | {} | {} | {}\n", 
-                   FormatDb(requested_.chanvol.FR, w2), FormatDb(commanded_.chanvol.FR, w2), 
+    std::format_to(std::back_inserter(table), "    chanvol FR:    | {} | {} | {}\n",
+                   FormatDb(requested_.chanvol.FR, w2), FormatDb(commanded_.chanvol.FR, w2),
                    FormatDb(reported_.chanvol.FR, w2));
-    std::format_to(std::back_inserter(table), "    chanvol C:     | {} | {} | {}\n", 
-                   FormatDb(requested_.chanvol.C, w2), FormatDb(commanded_.chanvol.C, w2), 
+    std::format_to(std::back_inserter(table), "    chanvol C:     | {} | {} | {}\n",
+                   FormatDb(requested_.chanvol.C, w2), FormatDb(commanded_.chanvol.C, w2),
                    FormatDb(reported_.chanvol.C, w2));
-    std::format_to(std::back_inserter(table), "    chanvol SW:    | {} | {} | {}\n", 
-                   FormatDb(requested_.chanvol.SW, w2), FormatDb(commanded_.chanvol.SW, w2), 
+    std::format_to(std::back_inserter(table), "    chanvol SW:    | {} | {} | {}\n",
+                   FormatDb(requested_.chanvol.SW, w2), FormatDb(commanded_.chanvol.SW, w2),
                    FormatDb(reported_.chanvol.SW, w2));
-    std::format_to(std::back_inserter(table), "    chanvol SL:    | {} | {} | {}\n", 
-                   FormatDb(requested_.chanvol.SL, w2), FormatDb(commanded_.chanvol.SL, w2), 
+    std::format_to(std::back_inserter(table), "    chanvol SL:    | {} | {} | {}\n",
+                   FormatDb(requested_.chanvol.SL, w2), FormatDb(commanded_.chanvol.SL, w2),
                    FormatDb(reported_.chanvol.SL, w2));
-    std::format_to(std::back_inserter(table), "    chanvol SR:    | {} | {} | {}", 
-                   FormatDb(requested_.chanvol.SR, w2), FormatDb(commanded_.chanvol.SR, w2), 
+    std::format_to(std::back_inserter(table), "    chanvol SR:    | {} | {} | {}",
+                   FormatDb(requested_.chanvol.SR, w2), FormatDb(commanded_.chanvol.SR, w2),
                    FormatDb(reported_.chanvol.SR, w2));
     Print(level, table);
 }

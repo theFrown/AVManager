@@ -17,19 +17,19 @@ private:
     Verbosity& original_slot_;
     Verbosity original_value_;
 public:
-    VerbosityOverride(Verbosity& original, Verbosity temp_level) 
-        : original_slot_(original), original_value_(original) 
+    VerbosityOverride(Verbosity& original, Verbosity temp_level)
+        : original_slot_(original), original_value_(original)
     {
         if (temp_level >= Verbosity::Info) {
-            std::cout << "Temporarily overriding verbosity level\n"; 
+            std::cout << "Temporarily overriding verbosity level\n";
         }
-        original_slot_ = temp_level; 
+        original_slot_ = temp_level;
     }
     ~VerbosityOverride() {
         if (original_slot_ >= Verbosity::Info) {
-            std::cout << "Restoring verbosity level\n"; 
+            std::cout << "Restoring verbosity level\n";
         }
-        original_slot_ = original_value_; 
+        original_slot_ = original_value_;
     }
     VerbosityOverride(const VerbosityOverride&) = delete;
     VerbosityOverride(VerbosityOverride&&) = delete;
@@ -58,7 +58,7 @@ struct DenonState {
 
 class AVRHandler {
 public:
-    explicit AVRHandler(std::function<bool(std::string_view)> log, std::string_view ip_address, 
+    explicit AVRHandler(std::function<bool(std::string_view)> log, std::string_view ip_address,
                         Verbosity verbosity = Verbosity::Info);
     ~AVRHandler();
     AVRHandler(const AVRHandler&) = delete;
@@ -81,11 +81,11 @@ public:
     static std::string FormatDb(int value, int width = 0);
 
 private:
-    enum class Report_ { OK, Data, NoData, Wait, Unknown, BadInput, Disconnected, SocketError, 
+    enum class Report_ { OK, Data, NoData, Wait, Unknown, BadInput, Disconnected, SocketError,
                          KeyError };
     enum class Waker_ { ComsReady, WindowMessageIn, TimeOut, Failed, Unknown };
     enum class ControlMode_ { Request, Report, Rest };
-    
+
     constexpr static int port_ = 23;
     constexpr static size_t inbufferlen_ = 270; //2x denon message max size (135 chars)
     constexpr static int heartbeat_interval_ = 1000;
@@ -98,7 +98,7 @@ private:
     int volume_step_ = 5; //the only one that can be changed in the denon
     Timer command_cooldown_{50};
     Timer response_deadline_{200};
-    
+
     //variables initialized through the constructor initializer list
     std::function<bool(std::string_view)> log_;
     Verbosity verbosity_;
@@ -131,9 +131,9 @@ private:
     int     SyncMuteKeys(KeyStates& keys);
     Report_ SyncIn();
     Report_ SyncInChanvols(std::string_view message);
-    Report_ SyncInString(std::string_view message, std::string_view prefix, 
+    Report_ SyncInString(std::string_view message, std::string_view prefix,
                       std::string_view report_string, std::string& report_slot);
-    Report_ SyncInDb(std::string_view message, std::string_view prefix, 
+    Report_ SyncInDb(std::string_view message, std::string_view prefix,
                       std::string_view report_string, int& report_slot);
     Report_ SyncOut();
     Report_ SyncOutChanvols();
@@ -145,7 +145,7 @@ private:
     Report_ Receive();
     Report_ Parse();
     Report_ Send(std::string_view cmd, bool wait = false);
-    
+
     void PrintStates(Verbosity level);
     void Print(Verbosity level, std::string_view msg) const;
     void Print(std::string_view msg) const { Print(Verbosity::Info, msg); }
