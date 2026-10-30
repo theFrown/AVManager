@@ -1,4 +1,8 @@
-add_executable(avmanager_tests google_example_test.cpp)
+add_executable(
+    avmanager_tests
+    google_example_test.cpp
+    avr_handler_test.cpp
+)
 set_target_properties(avmanager_tests PROPERTIES OUTPUT_NAME AVManager_TestSuite)
 include(FetchContent)
 FetchContent_Declare(
