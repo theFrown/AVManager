@@ -76,6 +76,10 @@ public:
 
     //helper functions, public only so they can be externally tested
     static std::string MakeCommand(std::string cmd, std::optional<int> num = std::nullopt);
+    //DbToString: inputs must satisfy `0 <= min <= max <= 980` to comply with the Denon protocol for
+    //volume, and the range `[min, max]` must include a multiple of 5 for the input to remain within
+    //that range after being rounded to the nearest multiple of 5. It is assumed the Denon is set to
+    //0.5 dB intervals.
     static std::string DbToString(int db_tenths, int zero = 800, int min = 0, int max = 980);
     static std::optional<int> StringToDb(std::string_view str, int zero = 800);
     static std::string FormatDb(int value, int width = 0);
