@@ -5,4 +5,15 @@ jobs:
         runs-on: windows-latest
         steps:
             - name: print hello
-              run: echo hello world
+              run: echo "hello world"
+    runtests:
+        runs-on: windows-latest
+        steps:
+            - name: checkout the repo
+              uses: actions/checkout@v7
+            - name: explore local directory
+              run: dir
+            - name: find current directory
+              run: echo $PWD
+
+
