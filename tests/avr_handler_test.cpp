@@ -1,6 +1,5 @@
 #include "avr_handler.h"
 #include <utility>
-#include <string>
 #include <format>
 #include <gtest/gtest.h>
 

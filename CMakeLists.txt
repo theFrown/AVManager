@@ -16,4 +16,11 @@ if(MSVC)
 endif()
 if(BUILD_TESTING)
     add_subdirectory(tests)
+    #the compiler strictness option below is deliberately only used for test builds. This is so that
+    #someone else can build the non-test builds without being blocked by a warning that I never saw,
+    #for instance when they use a different version of MSVC
+    if(MSVC)
+        target_compile_options(avmanager PRIVATE /WX)
+        target_compile_options(avmanager_core PRIVATE /WX)
+    endif()
 endif()

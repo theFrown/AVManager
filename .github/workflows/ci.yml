@@ -1,19 +1,10 @@
 name: CI
 on: [push]
 jobs:
-    hello:
-        runs-on: windows-latest
-        steps:
-            - name: print hello
-              run: echo "hello world"
-    runtests:
+    RunTests:
         runs-on: windows-latest
         steps:
             - name: checkout the repo
               uses: actions/checkout@v7
-            - name: explore local directory
-              run: dir
-            - name: find current directory
-              run: echo $PWD
-
-
+            - name: run ci powershell script
+              run: scripts/ci.ps1
