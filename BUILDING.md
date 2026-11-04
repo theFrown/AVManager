@@ -67,17 +67,21 @@ which in all cases will place the files in the associated folder.
 3. Start the build (either hit the `Build` button in the status bar or `Ctrl + Shift + P` > `CMake: Build`)
 
 ### Using the CI script
-This is a little overkill, so it is not necessarily recommended. The script forces a full rebuild,
-starting by reconfiguring all 4 presets, then rebuilding in all 4 presets, and finally it runs the
-test suite for both test-presets.
+This is a little overkill, so it is not necessarily recommended. By default, the script goes over
+all 4 presets in turn, and forces a full rebuild for each: first reconfiguring the preset, then
+rebuilding, and finally running the test suite (for the test-presets). It can optionally be called
+with the `-Preset` argument to only build one of them.
 
 1. Open a Powershell terminal in the repo root
-2. Run the script, either in a child terminal or directly:
+2. Run the script, either in a child terminal or directly, optionally with `-Preset` argument:
 ```
 pwsh -NoProfile -File scripts/ci.ps1
 ```
 ```
 scripts/ci.ps1
+```
+```
+scripts/ci.ps1 -Preset "windows-test-debug"
 ```
 
 ## Configuration

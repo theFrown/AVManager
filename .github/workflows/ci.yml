@@ -3,10 +3,15 @@ on: [push]
 permissions:
   contents: read
 jobs:
-  RunTests:
+  ci:
+    name: ${{ matrix.preset }}
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [windows-debug, windows-release, windows-test-debug, windows-test-release]
     steps:
-      - name: checkout the repo
+      - name: Checkout the repo
         uses: actions/checkout@v7
-      - name: run ci powershell script
-        run: scripts/ci.ps1
+      - name: Run CI powershell script
+        run: scripts/ci.ps1 -Preset ${{ matrix.preset }}

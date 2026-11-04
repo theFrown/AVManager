@@ -41,7 +41,7 @@ Where the project is going and why. Working document: it is updated as decisions
   Mixing the two produced a real bug (item 3).
 - **Tested before it reaches `main`.** CI now builds every configuration and runs the automated
   test suite; whatever the automated tests can't cover yet is tested by hand against the receiver
-  before merging. Untested work lives on a short-lived branch.
+  before merging. All work reaches `main` through a pull request from a short-lived branch.
 
 **Test coverage:** Automated tests are now possible and coverage is set to expand steadily,
 eventually including simulator tests. The table tracks functions/methods that have automated tests,
