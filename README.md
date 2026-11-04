@@ -47,7 +47,7 @@ The repo includes a dedicated [roadmap](ROADMAP.md) with more detail, but the sh
 
 | Currently working on |
 |---|
-| unit tests with GoogleTest and CI on GitHub Actions |
+| adding more (unit)tests with GoogleTest |
 | thread-safe logging so the `KeyboardHook` can log too |
 | splitting `AVRHandler` into smaller classes |
 | add automated tests against simulated receiver, possibly keyboard hook |

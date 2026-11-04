@@ -7,7 +7,8 @@
 | Ninja | unknown | 1.12.1|
 | Windows x64 | 10 | 11 Pro 26200 |
 | Visual Studio 2022 Build Tools (or Visual Studio 2022) with the "Desktop development with C++" workload. | unknown | MSVC toolset 14.44, Windows SDK 10.0.26100 |
-|(optional) Git | unknown | 2.54.0.windows.1 |
+|Powershell (optional, if you want to run `ci.ps1`)| unknown | 7.6.9 |
+|Git (optional) | unknown | 2.54.0.windows.1 |
 
 You can probably build with any other compiler that compiles C++20, but that has not been tested.
 
@@ -35,22 +36,49 @@ this places the build files in `build\windows-release\` including the executable
 `build\windows-release\AVManager.exe`. Place this file anywhere you like, but ideally in a location
 where the main Windows user profile has write permissions.
 
-***Alternatively***, use the debug build version for more flexible debugging:
+***Alternative variants:*** Use the debug build version for more flexible debugging, or either of
+the test-versions to compile and run the test suite at the associated optimization level:
 ```
 cmake --preset windows-debug
 cmake --build --preset windows-debug
 ```
-which will place the files in the associated folder.
+```
+cmake --preset windows-test-debug
+cmake --build --preset windows-test-debug
+ctest --preset windows-test-debug
+```
+```
+cmake --preset windows-test-release
+cmake --build --preset windows-test-release
+ctest --preset windows-test-release
+```
+which in all cases will place the files in the associated folder.
 
 ### With VSCode
 
 1. Install all the dependencies ***plus*** the latest version of the C/C++ extension and CMake Tools
  extension
-2. Select one of 2 *configure presets*: (either hit the preset button in the status bar or
+2. Select one of 4 *configure presets*: (either hit the preset button in the status bar or
 `Ctrl + Shift + P` > `CMake: Select Configure Preset`)
    - Release[windows-release] - runs with full optimization
    - Debug[windows-debug] - skips certain optimizations for debugging purposes
+   - Test-Debug[windows-test-debug]/Test-Release[windows-test-release] - compile the test suite with
+   otherwise the same config as debug/release
 3. Start the build (either hit the `Build` button in the status bar or `Ctrl + Shift + P` > `CMake: Build`)
+
+### Using the CI script
+This is a little overkill, so it is not necessarily recommended. The script forces a full rebuild,
+starting by reconfiguring all 4 presets, then rebuilding in all 4 presets, and finally it runs the
+test suite for both test-presets.
+
+1. Open a Powershell terminal in the repo root
+2. Run the script, either in a child terminal or directly:
+```
+pwsh -NoProfile -File scripts/ci.ps1
+```
+```
+scripts/ci.ps1
+```
 
 ## Configuration
 ### In the AVR settings
@@ -79,8 +107,8 @@ level (e.g. `AVRHandler avr{..., Verbosity::Info};`)
 true/false respectively.
   - `true`: logs are stored in a `logs` folder relative to the location of `AVManager.exe`
   - `false`: logs are stored in `%LOCALAPPDATA%`, i.e. `C:\Users\<username>\AppData\Local\AVManager\logs`
-- the increment of one button press: `volume_step_` in `avr_handler.h` should be set to match the
-setting in the AVR. I've got it set to 5, because my AVR is set to 0.5 dB increments.
+- the increment of one button press: `volume_step_multiplier_` in `avr_handler.h` could be increased
+  if you want the volume to change faster per button press.
 
 ## Running
 Run `AVManager.exe` from the command line, from explorer directly or through a shortcut.
@@ -98,9 +126,9 @@ the Windows volume untouched
 modifiers are used:
   - `without modifier`: **Main Volume**, will control the AVR the exact same way as when you press
   the associated button on the AVR's remote.
-    - `Volume Up` and `Volume Down`: each press increases/decreases the main volume by either
-    0.5 dB or 1 dB depending on AVR settings and `volume_step_`. *Note: if the code hangs and finds many volume up
-    presses it will cap the number to 10 presses to protect eardrums and speakers.*
+    - `Volume Up` and `Volume Down`: each press increases/decreases the main volume by 0.5 dB (or a
+    multiple thereof depending on `volume_step_multiplier_`). *Note: if the code hangs and finds
+    many volume up presses it will cap the number to 10 presses to protect eardrums and speakers.*
     - `Mute`: will either fully mute the main volume or toggle -40 dB depending on how you set it
     up on the AVR. *Note: if the code hangs and finds multiple presses when it resumes, it will
     assume "Mute On" was intended.*

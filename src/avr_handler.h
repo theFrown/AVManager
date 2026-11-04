@@ -78,8 +78,7 @@ public:
     static std::string MakeCommand(std::string cmd, std::optional<int> num = std::nullopt);
     //DbToString: inputs must satisfy `0 <= min <= max <= 980` to comply with the Denon protocol for
     //volume, and the range `[min, max]` must include a multiple of 5 for the input to remain within
-    //that range after being rounded to the nearest multiple of 5. It is assumed the Denon is set to
-    //0.5 dB intervals.
+    //that range after being rounded to the nearest multiple of 5 to match the Denon protocol.
     static std::string DbToString(int db_tenths, int zero = 800, int min = 0, int max = 980);
     static std::optional<int> StringToDb(std::string_view str, int zero = 800);
     static std::string FormatDb(int value, int width = 0);
@@ -96,10 +95,11 @@ private:
     constexpr static int min_volume_ = -800; //in 0.1db
     constexpr static int min_chanvol_ = -120;
     constexpr static int max_chanvol_ = 120;
+    constexpr static int volume_step_ = 5;
     constexpr static int max_volume_increase_steps_ = 10; //large volume jumps hurt ears/speakers
     constexpr static int key_sync_warn_delay_ = 100; //below is probably hard to notice in practice
     constexpr static int key_sync_error_delay_ = static_cast<int>(1.1 * heartbeat_interval_);
-    int volume_step_ = 5; //the only one that can be changed in the denon
+    int volume_step_multiplier_ = 1; //change to increase volume responsiveness
     Timer command_cooldown_{50};
     Timer response_deadline_{200};
 

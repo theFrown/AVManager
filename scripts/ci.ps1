@@ -6,10 +6,10 @@ if (-not $ToolPath) {
     Write-Output "`n`n[ERROR] VS tools not found, cannot create native toolprompt!"
     exit 1
 }
-. (Join-Path $ToolPath "\Common7\Tools\Launch-VsDevShell.ps1") -Arch amd64 -HostArch amd64
+& (Join-Path $ToolPath "\Common7\Tools\Launch-VsDevShell.ps1") -Arch amd64 -HostArch amd64
 
 #configure cmake and build
-Set-Location (Get-Item $PSScriptRoot).Parent
+Set-Location (Get-Item $PSScriptRoot).Parent.FullName
 foreach ($preset in "windows-debug", "windows-release", "windows-test-debug", "windows-test-release") {
     Write-Output "`n=== configuring $preset preset ==="
     cmake --preset $preset --fresh #--fresh so a local run behaves like a remote run

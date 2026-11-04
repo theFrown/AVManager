@@ -387,7 +387,7 @@ int AVRHandler::SyncKeys(KeyStates& keys) {
 
 bool AVRHandler::SyncVolumeKey(int steps, int& stored_value, int min, int max) {
     if (steps) {
-        int requested_level = stored_value + steps * volume_step_;
+        int requested_level = stored_value + (steps * volume_step_ * volume_step_multiplier_);
         int clamped_level = std::clamp(requested_level, min, max);
         if (requested_level != clamped_level) MessageBeep(0xFFFFFFFF);
         if (stored_value != clamped_level) {

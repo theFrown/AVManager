@@ -9,7 +9,7 @@
 //that rely on rounding, shifting or clamping, because those will be tested later.
 
 TEST(DbToString, Formats) {
-    //test assumes step of 5, i.e. 0.5 dB, is valid
+    //test uses Denon's standard 0.5 dB increments
     const int zero =   0; //so it doesn't factor into the test, i.e. `input = expected output`
     const int min  =   0;
     const int max  = 980;
@@ -41,7 +41,7 @@ TEST(DbToString, Formats) {
 }
 
 TEST(DbToString, ZeroShifts) {
-    //test assumes step of 5, i.e. 0.5 dB, is valid
+    //test uses Denon's standard 0.5 dB increments
     const int min  =   0;
     const int max  = 980;
 
@@ -75,7 +75,7 @@ TEST(DbToString, ZeroShifts) {
 }
 
 TEST(DbToString, Rounds) {
-    //test assumes step of 5, i.e. 0.5 dB
+    //test uses Denon's standard 0.5 dB increments
     std::pair<int, int> minmaxs[] = {
         {400, 600}, //well clear of test value range
         {490, 600}, //min touching value range
@@ -131,12 +131,12 @@ TEST(DbToString, Rounds) {
 }
 
 TEST(DbToString, ClampsDefault) {
-    //the three constants below reflect the *communication protocol*, not any current AVR *setting*
+    //the four constants below reflect the *communication protocol*, not any current AVR *setting*
     const int zero = 800;
     const int min  =   0;
     const int max  = 980;
+    const int step =   5;
 
-    const int step  = 5; //an AVR setting that may change `DbToString` behavior in the future
     const int lower = min - zero;
     const int upper = max - zero;
     const char* lower_string      = "00";
@@ -166,12 +166,12 @@ TEST(DbToString, ClampsDefault) {
 }
 
 TEST(DbToString, ClampsChannel) {
-    //the three constants below reflect the *communication protocol*, not any current AVR *setting*
+    //the four constants below reflect the *communication protocol*, not any current AVR *setting*
     const int zero_in  = 500;
     const int min_in   = 380;
     const int max_in   = 620;
+    const int step     =   5;
 
-    const int step  = 5; //an AVR setting that may change `DbToString` behavior in the future
     const int lower = min_in - zero_in;
     const int upper = max_in - zero_in;
     const char* lower_string      = "38";

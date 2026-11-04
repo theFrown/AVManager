@@ -6,7 +6,7 @@ Where the project is going and why. Working document: it is updated as decisions
 
 - Every item has a **permanent number**. Numbers are never reused or renumbered, even when
   an item is finished, dropped or moved to another stage. New items take the next free
-  number, whichever stage they land in. **Next free number: 63.**
+  number, whichever stage they land in. **Next free number: 64.**
 - Tags say what kind of work an item is: `feature`, `bug`, `refactor`, `test`, `infra`,
   `docs`, `decision` (a question to settle before building), `investigate`.
 - Status: ⬜ open · 🚧 in progress · ✅ done · ✖ dropped. Finished items stay where they are.
@@ -39,15 +39,26 @@ Where the project is going and why. Working document: it is updated as decisions
 - **One owner per fact.** For example, the command cooldown is a property of the connection
   (a rate limit protecting the receiver); the response deadline is a property of a request.
   Mixing the two produced a real bug (item 3).
-- **Tested before it reaches `main`.** Initially this means every push has been manually
-  tested with Unit tests and manual test cases. This will move to simulator tests run in CI
-  and tests against the real receiver run locally before merging. Untested work lives on a
-  short-lived branch.
+- **Tested before it reaches `main`.** CI now builds every configuration and runs the automated
+  test suite; whatever the automated tests can't cover yet is tested by hand against the receiver
+  before merging. Untested work lives on a short-lived branch.
 
-**Current focus:** Stage 2, top to bottom: routing logging through one `Log` function
-(item 48), build instructions (item 12), then a first CI pass (items 13–17) so the
-Stage 3 split happens with tests underneath; then the rest of logging (items 49–52),
-single instance and running in the background (items 53–54).
+**Test coverage:** Automated tests are now possible and coverage is set to expand steadily,
+eventually including simulator tests. The table tracks functions/methods that have automated tests,
+counted per function. In the table *Pure* means the output depends only on the inputs and on state a
+test can set up. *The rest* is currently everything not sorted yet, once the Stage 3 split happens
+we can differentiate based on how functions get tested.
+
+| category | tested |
+|---|---|
+| pure functions | 1/6 |
+| the rest | 0/~76 |
+| **total** | **1/~82** |
+
+**Current focus:** Stage 2, top to bottom: CI is in place (items 13, 15), so next are the
+remaining unit tests (item 14), the non-ASCII path fix (item 55) and the rest of the first
+CI pass (items 16–17), so the Stage 3 split happens with tests underneath; then the rest of
+logging (items 49–52), single instance and running in the background (items 53–54).
 
 **Open strategic questions:** items 19, 25.
 
@@ -121,14 +132,16 @@ wrong.
   control protocol document (Denon does not publish one for this model; the README links
   the community copy). Building, configuration, usage and troubleshooting live in
   `BUILDING.md`.
-- **13** · 🚧 · `test` — GoogleTest via CMake `FetchContent`, registered with CTest. Port the
+- **13** · ✅ · `test` — GoogleTest via CMake `FetchContent`, registered with CTest. Port the
   existing dB-conversion test to it. Preceded by restructuring: sources moved into `src/`,
   file names in snake_case (with only the include and build-path edits each step needs),
-  and the program's code as a library that both the application and the tests link.
+  and the program's code as a library that both the application and the tests link. The
+  port became a full `DbToString` suite, and test presets now sit next to the plain ones.
 - **14** · ⬜ · `test` — Unit tests for the other pure functions: `StringToDb`, `MakeCommand`,
-  `Parse`, `ProcessCombo`.
-- **15** · ⬜ · `infra` — GitHub Actions: build and run tests on `windows-latest` on every
-  push.
+  `FormatDb`, `Parse`, `ProcessCombo`.
+- **15** · ✅ · `infra` — GitHub Actions: build all four presets and run the tests on
+  `windows-latest` on every push, through `scripts/ci.ps1`, which also runs locally. Warnings
+  are errors in the test presets.
 - **55** · ⬜ · `bug` — Non-ASCII paths: converting a path to text uses the system code
   page, so characters outside it (e.g. "Ł" in a username) make the conversion throw and
   end the program at logger start-up, and characters inside it (e.g. "ü") print garbled.
@@ -283,13 +296,18 @@ goes on the side whose other half can be faked.
 - **44** · ⬜ · `bug` — Special values in the receiver's replies are parsed as ordinary
   levels: `CVSW 00` means subwoofer off (currently read as −50 dB, outside the channel
   range), and `MV00` means volume off (the receiver displays `---`, not −80 dB).
-- **62** · ⬜ · `feature` — Use the receiver's own volume step setting (0.5 dB or 1 dB, as
+- **62** · ✖ · `feature` — Use the receiver's own volume step setting (0.5 dB or 1 dB, as
   configured on the receiver) instead of the fixed 0.5 dB step in the code, read from the
   receiver if the protocol exposes it. First verify whether a receiver set to 1 dB steps
-  ignores half-dB commands.
-- **57** · ⬜ · `refactor` — Protocol state values (`STANDBY`, `ON`, `OFF`, …) are written as
-  string literals in the control code; give them named constants in `denon_protocol.h`
-  next to the commands, so every protocol string lives in one file.
+  ignores half-dB commands. Dropped: turns out to be a misunderstanding, there is no such setting in
+  the menus or the protocol; Denon volume moves in 0.5 dB steps.
+- **57** · ⬜ · `refactor` — Protocol values are written as literals in the control code:
+  state values (`STANDBY`, `ON`, `OFF`, …) and the volume ranges in their wire form
+  (800/0/980, 500/380/620). Give them named constants in `denon_protocol.h` next to the
+  commands, so every protocol value lives in one file.
+- **63** · ⬜ · `investigate` — Look beyond `/W4`: review what `/Wall` and clang-tidy report
+  and enable the warnings worth having. Start with C4365 (signed/unsigned conversions),
+  C4061 and C4868.
 
 ---
 
