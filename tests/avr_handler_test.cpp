@@ -15,7 +15,7 @@ TEST(DbToString, Formats) {
     const int max  = 980;
 
     std::pair<int, const char*> cases[] = {
-        {  0, "00"},
+        {  0, "0a0"},
         {  5, "005"},
         { 10, "01"},
         { 15, "015"},
