@@ -387,7 +387,7 @@ int AVRHandler::SyncKeys(KeyStates& keys) {
 
 bool AVRHandler::SyncVolumeKey(int steps, int& stored_value, int min, int max) {
     if (steps) {
-        int requested_level = stored_value + steps * volume_step_;
+        int requested_level = stored_value + (steps * volume_step_ * volume_step_multiplier_);
         int clamped_level = std::clamp(requested_level, min, max);
         if (requested_level != clamped_level) MessageBeep(0xFFFFFFFF);
         if (stored_value != clamped_level) {
@@ -878,13 +878,13 @@ std::string AVRHandler::MakeCommand(std::string cmd, std::optional<int> num) {
 
 std::string AVRHandler::DbToString(int db_tenths, int zero, int min, int max) {
     std::string result;
-    db_tenths = static_cast<int>(std::round(db_tenths / 5.0)) * 5;
     db_tenths += zero;
+    db_tenths = static_cast<int>(std::round(db_tenths / 5.0)) * 5;
     if (db_tenths <= min) {
-        db_tenths = min;
+        db_tenths = ((min + 4) / 5) * 5; //ceil (for min >= 0) to nearest multiple of 5
     }
     else if (db_tenths >= max) {
-        db_tenths = max;
+        db_tenths = (max / 5) * 5; //floor (for max >= 0) to nearest multiple of 5
     }
     if (db_tenths < 100) {
         result = "0";
