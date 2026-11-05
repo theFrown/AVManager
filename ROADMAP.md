@@ -40,8 +40,9 @@ Where the project is going and why. Working document: it is updated as decisions
   (a rate limit protecting the receiver); the response deadline is a property of a request.
   Mixing the two produced a real bug (item 3).
 - **Tested before it reaches `main`.** CI now builds every configuration and runs the automated
-  test suite; whatever the automated tests can't cover yet is tested by hand against the receiver
-  before merging. All work reaches `main` through a pull request from a short-lived branch.
+  test suite on every pull request and on every push to `main`; whatever the automated tests can't
+  cover yet is tested by hand against the receiver before merging. All work reaches `main` through a
+  pull request from a short-lived branch.
 
 **Test coverage:** Automated tests are now possible and coverage is set to expand steadily,
 eventually including simulator tests. The table tracks functions/methods that have automated tests,
@@ -140,8 +141,8 @@ wrong.
 - **14** · ⬜ · `test` — Unit tests for the other pure functions: `StringToDb`, `MakeCommand`,
   `FormatDb`, `Parse`, `ProcessCombo`.
 - **15** · ✅ · `infra` — GitHub Actions: build all four presets and run the tests on
-  `windows-latest` on every push, through `scripts/ci.ps1`, which also runs locally. Warnings
-  are errors in the test presets.
+  `windows-latest` on every pull request and every push to `main`, through `scripts/ci.ps1`, which
+  also runs locally. Warnings are errors in the test presets.
 - **55** · ⬜ · `bug` — Non-ASCII paths: converting a path to text uses the system code
   page, so characters outside it (e.g. "Ł" in a username) make the conversion throw and
   end the program at logger start-up, and characters inside it (e.g. "ü") print garbled.

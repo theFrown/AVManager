@@ -17,7 +17,7 @@ All of that will be addressed by this program:
 - Restarting or reconfiguring whatever Windows audio components needed to get back to 7.1.
 - Future sub-goal: detect when Atmos-enabled content starts playing, launch Dolby Access and confirm the entire chain hooks onto Atmos, drop back to 7.1 LPCM afterwards[^3].
 
-A secondary goal in parallel to those above is for me to expand my knowledge of C++, Windows programming, Git, CMake, and any other tools that are relevant. So far I haven't added any tools inside the codebase just for the sake of it, but I will soon start playing with a basic CI/CD flow to learn the basics.
+A secondary goal in parallel to those above is for me to expand my knowledge of C++, Windows programming, Git, CMake, and any other tools that are relevant. So far I haven't added any tools *inside* the codebase just for the sake of it, but I do have a basic CI workflow set up that one might call overkill for a small single dev project, and I might explore something similar for CD (if it even makes sense).
 
 [^1]: The Denon needs line of sight and my plants keep shifting to hide the sensor. For the best audio quality, you want Windows at 100% volume and rely entirely on the Denon to control the actual sound level.
 
