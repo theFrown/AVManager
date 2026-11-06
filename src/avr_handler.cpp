@@ -81,7 +81,7 @@ AVRHandler::~AVRHandler() {
 
 auto AVRHandler::ControlLoop() -> ExitCode {
     KeyboardHook::KeyListener key_listener;
-    Report_ response = ControlPing(false);
+    Report_ response = ControlPing(false, true);
     if (response != Report_::OK) {
         return ExitCode::Ping;
     }
@@ -127,30 +127,59 @@ auto AVRHandler::ControlLoop() -> ExitCode {
                 }
             }
         }
+        //Pinging the AVR (if necessary)
+        response = ControlPing(false);
+        if ((response == Report_::SocketError) || (response == Report_::Disconnected)) {
+            return ExitCode::Ping;
+        }
 
         //sleeping until earliest event or nearest deadline
         int deadline1 = command_cooldown_.GetRemaining().value_or(heartbeat_interval_);
         int deadline2 = response_deadline_.GetRemaining().value_or(heartbeat_interval_);
-        ControlSleep(std::min({deadline1, deadline2, heartbeat_interval_}));
+        int deadline3 = ping_cooldown_.GetRemaining().value_or(heartbeat_interval_);
+        int deadline4 = ping_deadline_.GetRemaining().value_or(heartbeat_interval_);
+        ControlSleep(std::min({deadline1, deadline2, deadline3, deadline4, heartbeat_interval_}));
     }
     return ExitCode::Normal;
 }
 
 auto AVRHandler::ControlPing(bool silent, bool block, int time_out) -> Report_ {
-    if (!block) {
-        Print(Verbosity::Warning, "non-blocking ControlPing still needs to be implemented!");
-        block = true; //TODO: implement and remove this guard!
-    }
+    Report_ response = Report_::NoData;
     std::optional<VerbosityOverride> silence;
     if (silent) {
         silence.emplace(verbosity_, Verbosity::Warning);
     }
+    if (!block) {
+        if (ping_deadline_.IsSet()) { //i.e. we have sent a ping that has not been answered
+            if (ping_deadline_.IsExpired()) {
+                Print(Verbosity::Error, "No Ping response received from AVR!");
+                return Report_::Disconnected;
+            }
+            return Report_::Wait;
+        }
+        if (ping_cooldown_.IsExpired()) { //i.e. it is time to send a ping
+            if (command_cooldown_.IsPending()) {
+                Print(Verbosity::Trace, "Delaying Ping to wait for command cooldown");
+                //extending ping_cooldown_ prevents it from waking us up before we could try again
+                ping_cooldown_.Set(*command_cooldown_.GetRemaining() + 1);
+                return Report_::Wait;
+            }
+            Print(Verbosity::Trace, "Sending Ping to AVR");
+            response = Send(denon_cmd::power_status);
+            if (response == Report_::OK) {
+                ping_deadline_.Set(); //make sure we wake up to check for a response
+                ping_cooldown_.Reset(); //stops this from waking us up while we wait
+            }
+            return response;
+        }
+        return Report_::OK;
+    }
     Print(Verbosity::Debug, "Testing coms channel");
     signal_ = denon_cmd::power_prefix;
     signal_received_ = false;
-    Report_ response = Send(denon_cmd::power_status, block);
+    response = Send(denon_cmd::power_status, block);
     Timer deadline;
-    if ((!block) || (response != Report_::OK)) {
+    if (response != Report_::OK) {
         return response;
     }
     else {
@@ -792,6 +821,8 @@ auto AVRHandler::Receive() -> Report_ {
         return Report_::Disconnected;
     }
     else {
+        ping_cooldown_.Set(); //any message resets the ping clock
+        ping_deadline_.Reset(); //any message clears an awaited ping response
         for (int i = 0; i < response; i++) {
             if (inbuffer_[i] == '\r') {  //this symbol prints variably in terminals
                 inbuffer_[i] = '|';      //this symbol should never occur in the denon protocol

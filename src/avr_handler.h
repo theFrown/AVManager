@@ -102,6 +102,8 @@ private:
     int volume_step_multiplier_ = 1; //change to increase volume responsiveness
     Timer command_cooldown_{50};
     Timer response_deadline_{200};
+    Timer ping_cooldown_{5000}; //how often we ping
+    Timer ping_deadline_{500}; //how long we wait for a ping reply, only set between ping and pong
 
     //variables initialized through the constructor initializer list
     std::function<bool(std::string_view)> log_;
@@ -125,7 +127,7 @@ private:
     bool event_healthy_ = false;
     CtorCode ctor_status_ = CtorCode::Unknown;
 
-    Report_ ControlPing(bool silent = true, bool block = true, int time_out = 1000);
+    Report_ ControlPing(bool silent = true, bool block = false, int time_out = 1000);
     Report_ ControlResync();
     Report_ ControlReceive(int time_out_ms = 0);
     Waker_  ControlSleep(int ms);
